@@ -1,4 +1,4 @@
-import type { CharacterId, WorldPoint } from "../types";
+import type { CharacterId, EnemyId, WorldPoint } from "../types";
 
 export interface CollisionPolygon {
   id: string;
@@ -32,4 +32,9 @@ export interface LevelDefinition {
   coverZones: WorldPoint[][];
   interactionZones: WorldPoint[][];
   enemySpawnPoints: WorldPoint[];
+  enemyPatrols: Array<{
+    id: EnemyId;
+    name: string;
+    route: WorldPoint[];
+  }>;
 }

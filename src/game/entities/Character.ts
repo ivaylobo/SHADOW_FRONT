@@ -17,7 +17,7 @@ export interface CharacterOptions {
   animator: SpriteAnimator;
 }
 
-export type WalkableCheck = (position: WorldPoint, radius: number) => boolean;
+export type WalkableCheck = (character: Character, position: WorldPoint) => boolean;
 
 export class Character {
   readonly id: CharacterId;
@@ -138,7 +138,7 @@ export class Character {
       y: this.state.position.y + movement.y * stepDistance
     };
 
-    if (!isWalkable(nextPosition, GAME_CONFIG.collisionRadius)) {
+    if (!isWalkable(this, nextPosition)) {
       this.stop();
       return;
     }
@@ -160,6 +160,23 @@ export class Character {
     const bottom = this.state.position.y + 8;
 
     return point.x >= left && point.x <= right && point.y >= top && point.y <= bottom;
+  }
+
+  getBodyCollisionPolygon(position: WorldPoint = this.state.position): WorldPoint[] {
+    const size = this.animator.getRenderSize();
+    const halfWidth = size.width * GAME_CONFIG.characterBodyCollisionWidthRatio * 0.5;
+    const shoulderY = position.y - size.height * GAME_CONFIG.characterBodyCollisionTopRatio;
+    const hipY = position.y - size.height * GAME_CONFIG.characterBodyCollisionBottomRatio;
+    const footY = position.y - GAME_CONFIG.characterBodyFootInset;
+
+    return [
+      { x: position.x - halfWidth * 0.72, y: shoulderY },
+      { x: position.x + halfWidth * 0.72, y: shoulderY },
+      { x: position.x + halfWidth, y: hipY },
+      { x: position.x + halfWidth * 0.78, y: footY },
+      { x: position.x - halfWidth * 0.78, y: footY },
+      { x: position.x - halfWidth, y: hipY }
+    ];
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
@@ -239,6 +256,15 @@ export class Character {
       0,
       Math.PI * 2
     );
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255, 220, 90, 0.88)";
+    ctx.beginPath();
+    const bodyPolygon = this.getBodyCollisionPolygon();
+    ctx.moveTo(bodyPolygon[0].x, bodyPolygon[0].y);
+    for (let index = 1; index < bodyPolygon.length; index += 1) {
+      ctx.lineTo(bodyPolygon[index].x, bodyPolygon[index].y);
+    }
+    ctx.closePath();
     ctx.stroke();
 
     if (this.state.targetPosition) {

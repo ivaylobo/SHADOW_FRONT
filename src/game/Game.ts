@@ -3,19 +3,23 @@ import { AssetLoader } from "./AssetLoader";
 import { Camera } from "./Camera";
 import { GAME_CONFIG } from "./config";
 import { Character } from "./entities/Character";
+import { Enemy } from "./entities/Enemy";
 import {
   circleIntersectsPolygon,
   distance,
   getMaxY,
   getPolygonCenter,
   isInsideWorld,
+  pointInPolygon,
+  polygonsIntersect,
+  segmentsIntersect,
   type Size
 } from "./geometry";
 import { GameLoop } from "./GameLoop";
 import { InputManager, type CanvasCommand } from "./InputManager";
 import type { CollisionPolygon, ObliquePrism } from "./levels/LevelDefinition";
 import { testLevel } from "./levels/testLevel";
-import type { CharacterId, Direction, MovingMotion, WorldPoint } from "./types";
+import type { CharacterId, Direction, EnemyId, MovingMotion, WorldPoint } from "./types";
 import { ControlsPanel } from "./ui/ControlsPanel";
 
 type TerrainMotion = Exclude<MovingMotion, "crawl">;
@@ -45,6 +49,16 @@ interface PhotoFlash {
   duration: number;
 }
 
+interface AlarmFlash {
+  age: number;
+  duration: number;
+}
+
+interface DetectionCone {
+  close: WorldPoint[];
+  far: WorldPoint[];
+}
+
 export class Game {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly level = testLevel;
@@ -53,6 +67,7 @@ export class Game {
   private readonly controlsPanel: ControlsPanel;
   private readonly loop = new GameLoop();
   private readonly characters = new Map<CharacterId, Character>();
+  private readonly enemies = new Map<EnemyId, Enemy>();
   private readonly photoArtifact = {
     position: { x: 880, y: 715 },
     radius: 26,
@@ -68,6 +83,7 @@ export class Game {
   private markers: Marker[] = [];
   private shotTraces: ShotTrace[] = [];
   private photoFlashes: PhotoFlash[] = [];
+  private alarmFlash: AlarmFlash | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -112,6 +128,17 @@ export class Game {
           animator
         })
       );
+      for (const patrol of this.level.enemyPatrols) {
+        this.enemies.set(
+          patrol.id,
+          new Enemy({
+            id: patrol.id,
+            name: patrol.name,
+            image: assets.enemyImage,
+            route: patrol.route
+          })
+        );
+      }
 
       this.selectCharacter("maya");
       this.inputManager = new InputManager(this.canvas, this.camera, {
@@ -140,11 +167,18 @@ export class Game {
   private update(deltaTime: number): void {
     for (const character of this.characters.values()) {
       if (character.hasActiveWork()) {
-        character.update(deltaTime, (position, radius) =>
-          this.isPositionWalkable(position, radius)
+        character.update(deltaTime, (movingCharacter, position) =>
+          this.isCharacterPositionWalkable(movingCharacter, position)
         );
       }
     }
+
+    for (const enemy of this.enemies.values()) {
+      enemy.update(deltaTime, (position, radius) =>
+        this.isEnemyPositionWalkable(position, radius)
+      );
+    }
+    this.updateEnemyDetection();
 
     this.markers = this.markers
       .map((marker) => ({
@@ -164,6 +198,12 @@ export class Game {
         age: flash.age + deltaTime
       }))
       .filter((flash) => flash.age <= flash.duration);
+    if (this.alarmFlash) {
+      this.alarmFlash.age += deltaTime;
+      if (this.alarmFlash.age >= this.alarmFlash.duration) {
+        this.alarmFlash = null;
+      }
+    }
 
     const selectedCharacter = this.getSelectedCharacter();
     this.camera.update(selectedCharacter.state.position, deltaTime);
@@ -183,6 +223,7 @@ export class Game {
     this.ctx.translate(-this.camera.position.x, -this.camera.position.y);
     this.drawLevelBase();
     this.drawMarkers();
+    this.drawEnemyVision();
     this.drawSortedRenderables();
     this.drawSpecialEffects();
     this.drawMayaPhotoPrompt();
@@ -196,6 +237,7 @@ export class Game {
     if (this.debugEnabled) {
       this.drawScreenDebug();
     }
+    this.drawAlarmIndicator();
   }
 
   private handleCanvasCommand(command: CanvasCommand): void {
@@ -211,7 +253,7 @@ export class Game {
 
     const selectedCharacter = this.getSelectedCharacter();
 
-    if (!this.isPositionWalkable(command.worldPosition, GAME_CONFIG.collisionRadius)) {
+    if (!this.isCharacterPositionWalkable(selectedCharacter, command.worldPosition)) {
       this.addMarker(command.worldPosition, "invalid");
       return;
     }
@@ -313,13 +355,111 @@ export class Game {
     return charactersFrontToBack.find((character) => character.containsWorldPoint(point)) ?? null;
   }
 
-  private isPositionWalkable(position: WorldPoint, radius: number): boolean {
+  private updateEnemyDetection(): void {
+    for (const enemy of this.enemies.values()) {
+      if (enemy.state === "shooting") {
+        continue;
+      }
+
+      const detected = [...this.characters.values()].find((character) =>
+        this.canEnemySeeCharacter(enemy, character)
+      );
+
+      if (!detected) {
+        continue;
+      }
+
+      enemy.startShooting(detected.state.position);
+      this.triggerAlarm(enemy);
+    }
+  }
+
+  private canEnemySeeCharacter(enemy: Enemy, character: Character): boolean {
+    const vision = enemy.getVision();
+    const target = {
+      x: character.state.position.x,
+      y: character.state.position.y - 42
+    };
+    const toTarget = {
+      x: target.x - vision.eye.x,
+      y: target.y - vision.eye.y
+    };
+    const targetDistance = Math.hypot(toTarget.x, toTarget.y);
+
+    if (targetDistance > vision.farRange || targetDistance < 0.001) {
+      return false;
+    }
+
+    const angleToTarget = Math.atan2(toTarget.y, toTarget.x);
+    const angleDelta = Math.abs(this.angleDifference(angleToTarget, vision.sweepFacingAngle));
+    if (angleDelta > vision.halfAngle) {
+      return false;
+    }
+
+    if (!this.hasLineOfSight(vision.eye, target)) {
+      return false;
+    }
+
+    if (targetDistance <= vision.closeRange) {
+      return true;
+    }
+
+    return character.state.stance !== "prone";
+  }
+
+  private triggerAlarm(source: Enemy): void {
+    this.alarmFlash = {
+      age: 0,
+      duration: GAME_CONFIG.enemy.alarmDuration
+    };
+
+    for (const enemy of this.enemies.values()) {
+      if (enemy.id !== source.id) {
+        enemy.respondTo(source);
+      }
+    }
+  }
+
+  private hasLineOfSight(from: WorldPoint, to: WorldPoint): boolean {
+    return !this.level.collisionPolygons.some((polygon) =>
+      this.segmentIntersectsPolygon(from, to, polygon.points)
+    );
+  }
+
+  private segmentIntersectsPolygon(from: WorldPoint, to: WorldPoint, polygon: WorldPoint[]): boolean {
+    if (pointInPolygon(from, polygon) || pointInPolygon(to, polygon)) {
+      return true;
+    }
+
+    for (let index = 0; index < polygon.length; index += 1) {
+      const a = polygon[index];
+      const b = polygon[(index + 1) % polygon.length];
+      if (segmentsIntersect(from, to, a, b)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private isEnemyPositionWalkable(position: WorldPoint, radius: number): boolean {
     if (!isInsideWorld(position, this.level.worldSize, radius)) {
       return false;
     }
 
     return !this.level.collisionPolygons.some((polygon) =>
       circleIntersectsPolygon(position, radius, polygon.points)
+    );
+  }
+
+  private isCharacterPositionWalkable(character: Character, position: WorldPoint): boolean {
+    if (!isInsideWorld(position, this.level.worldSize, GAME_CONFIG.collisionRadius)) {
+      return false;
+    }
+
+    const bodyPolygon = character.getBodyCollisionPolygon(position);
+    return !this.level.collisionPolygons.some((polygon) =>
+      polygonsIntersect(bodyPolygon, polygon.points)
     );
   }
 
@@ -455,7 +595,11 @@ export class Game {
     const items: RenderItem[] = [
       ...this.level.decorativeObjects.map((object) => ({
         sortY: getMaxY(object.footprint) + object.height,
-        draw: () => this.drawObliquePrism(object)
+        draw: () => this.drawFlatObstacle(object)
+      })),
+      ...[...this.enemies.values()].map((enemy) => ({
+        sortY: enemy.position.y,
+        draw: () => enemy.draw(this.ctx)
       })),
       {
         sortY: this.photoArtifact.position.y,
@@ -474,40 +618,20 @@ export class Game {
     }
   }
 
-  private drawObliquePrism(object: ObliquePrism): void {
-    const center = getPolygonCenter(object.footprint);
-    const lowered = object.footprint.map((point) => ({
-      x: point.x,
-      y: point.y + object.height
-    }));
-
-    for (let i = 0; i < object.footprint.length; i += 1) {
-      const current = object.footprint[i];
-      const next = object.footprint[(i + 1) % object.footprint.length];
-      const currentLower = lowered[i];
-      const nextLower = lowered[(i + 1) % lowered.length];
-      const midpoint = {
-        x: (current.x + next.x) / 2,
-        y: (current.y + next.y) / 2
-      };
-      const visibleFace = midpoint.y >= center.y || midpoint.x >= center.x;
-
-      if (!visibleFace) {
-        continue;
-      }
-
-      this.ctx.fillStyle = midpoint.y >= center.y ? object.frontColor : object.sideColor;
-      this.drawPolygon([current, next, nextLower, currentLower]);
-      this.ctx.strokeStyle = object.strokeColor;
-      this.ctx.lineWidth = 1.5;
-      this.strokePolygon([current, next, nextLower, currentLower]);
-    }
-
-    this.ctx.fillStyle = object.topColor;
+  private drawFlatObstacle(object: ObliquePrism): void {
+    this.ctx.save();
+    this.ctx.fillStyle = "rgba(76, 86, 66, 0.94)";
     this.drawPolygon(object.footprint);
     this.ctx.strokeStyle = object.strokeColor;
     this.ctx.lineWidth = 2;
     this.strokePolygon(object.footprint);
+
+    const center = getPolygonCenter(object.footprint);
+    this.ctx.fillStyle = "rgba(18, 23, 15, 0.16)";
+    this.ctx.beginPath();
+    this.ctx.ellipse(center.x, center.y, 18, 8, 0, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.restore();
   }
 
   private drawPhotoArtifact(): void {
@@ -564,6 +688,44 @@ export class Game {
       this.ctx.stroke();
       this.ctx.restore();
     }
+  }
+
+  private drawEnemyVision(): void {
+    for (const enemy of this.enemies.values()) {
+      const cone = this.buildDetectionCone(enemy);
+
+      this.ctx.save();
+      this.ctx.fillStyle = "rgba(26, 104, 45, 0.32)";
+      this.drawPolygon(cone.far);
+      this.ctx.fillStyle = "rgba(132, 238, 104, 0.38)";
+      this.drawPolygon(cone.close);
+      this.ctx.strokeStyle = enemy.state === "shooting" ? "rgba(255, 80, 62, 0.74)" : "rgba(142, 232, 114, 0.7)";
+      this.ctx.lineWidth = 1.6;
+      this.strokePolygon(cone.far);
+      this.ctx.restore();
+    }
+  }
+
+  private buildDetectionCone(enemy: Enemy): DetectionCone {
+    const vision = enemy.getVision();
+    const leftAngle = vision.sweepFacingAngle - vision.halfAngle;
+    const rightAngle = vision.sweepFacingAngle + vision.halfAngle;
+
+    const pointAt = (angle: number, range: number): WorldPoint => ({
+      x: vision.eye.x + Math.cos(angle) * range,
+      y: vision.eye.y + Math.sin(angle) * range
+    });
+
+    return {
+      close: [vision.eye, pointAt(leftAngle, vision.closeRange), pointAt(rightAngle, vision.closeRange)],
+      far: [
+        vision.eye,
+        pointAt(leftAngle, vision.closeRange),
+        pointAt(leftAngle, vision.farRange),
+        pointAt(rightAngle, vision.farRange),
+        pointAt(rightAngle, vision.closeRange)
+      ]
+    };
   }
 
   private drawMayaPhotoPrompt(): void {
@@ -637,6 +799,10 @@ export class Game {
       character.drawDebug(this.ctx);
     }
 
+    for (const enemy of this.enemies.values()) {
+      enemy.drawDebug(this.ctx);
+    }
+
     const bounds = this.camera.getVisibleBounds();
     this.ctx.save();
     this.ctx.strokeStyle = "rgba(255, 255, 255, 0.48)";
@@ -704,8 +870,30 @@ export class Game {
       `direction: ${selected.state.direction}`,
       `motion: ${selected.state.motion}`,
       `frame: ${selected.state.frameIndex}`,
+      `enemies: ${[...this.enemies.values()].map((enemy) => `${enemy.id}:${enemy.state}`).join(" ")}`,
       `debug collision: ${this.level.collisionPolygons.length} polygons`
     ].join("\n");
+  }
+
+  private drawAlarmIndicator(): void {
+    if (!this.alarmFlash) {
+      return;
+    }
+
+    const progress = this.alarmFlash.age / this.alarmFlash.duration;
+    const pulse = 0.45 + Math.sin(progress * Math.PI * 18) * 0.22;
+
+    this.ctx.save();
+    this.ctx.fillStyle = `rgba(255, 31, 31, ${0.58 + pulse * 0.28})`;
+    this.ctx.strokeStyle = "rgba(255, 210, 190, 0.82)";
+    this.ctx.lineWidth = 3;
+    this.ctx.beginPath();
+    this.ctx.arc(this.viewport.width - 42, 42, 20 + pulse * 5, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.stroke();
+    this.ctx.fillStyle = "rgba(120, 0, 0, 0.34)";
+    this.ctx.fillRect(0, 0, this.viewport.width, 8);
+    this.ctx.restore();
   }
 
   private drawPolygon(points: WorldPoint[]): void {
@@ -730,6 +918,10 @@ export class Game {
 
     this.ctx.closePath();
     this.ctx.stroke();
+  }
+
+  private angleDifference(a: number, b: number): number {
+    return Math.atan2(Math.sin(a - b), Math.cos(a - b));
   }
 
   private renderMessage(message: string, color = "#e5e1d6"): void {

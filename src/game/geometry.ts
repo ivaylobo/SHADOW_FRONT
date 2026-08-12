@@ -133,6 +133,71 @@ export function circleIntersectsPolygon(
   return false;
 }
 
+export function polygonsIntersect(a: WorldPoint[], b: WorldPoint[]): boolean {
+  for (const point of a) {
+    if (pointInPolygon(point, b)) {
+      return true;
+    }
+  }
+
+  for (const point of b) {
+    if (pointInPolygon(point, a)) {
+      return true;
+    }
+  }
+
+  for (let aIndex = 0; aIndex < a.length; aIndex += 1) {
+    const aStart = a[aIndex];
+    const aEnd = a[(aIndex + 1) % a.length];
+
+    for (let bIndex = 0; bIndex < b.length; bIndex += 1) {
+      const bStart = b[bIndex];
+      const bEnd = b[(bIndex + 1) % b.length];
+
+      if (segmentsIntersect(aStart, aEnd, bStart, bEnd)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+export function segmentsIntersect(a: WorldPoint, b: WorldPoint, c: WorldPoint, d: WorldPoint): boolean {
+  const orientation = (p: WorldPoint, q: WorldPoint, r: WorldPoint): number =>
+    (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
+
+  const onSegment = (p: WorldPoint, q: WorldPoint, r: WorldPoint): boolean =>
+    q.x <= Math.max(p.x, r.x) &&
+    q.x >= Math.min(p.x, r.x) &&
+    q.y <= Math.max(p.y, r.y) &&
+    q.y >= Math.min(p.y, r.y);
+
+  const o1 = orientation(a, b, c);
+  const o2 = orientation(a, b, d);
+  const o3 = orientation(c, d, a);
+  const o4 = orientation(c, d, b);
+
+  if (o1 * o2 < 0 && o3 * o4 < 0) {
+    return true;
+  }
+
+  if (Math.abs(o1) < 0.0001 && onSegment(a, c, b)) {
+    return true;
+  }
+  if (Math.abs(o2) < 0.0001 && onSegment(a, d, b)) {
+    return true;
+  }
+  if (Math.abs(o3) < 0.0001 && onSegment(c, a, d)) {
+    return true;
+  }
+  if (Math.abs(o4) < 0.0001 && onSegment(c, b, d)) {
+    return true;
+  }
+
+  return false;
+}
+
 export function getPolygonCenter(points: WorldPoint[]): WorldPoint {
   const total = points.reduce(
     (sum, point) => ({

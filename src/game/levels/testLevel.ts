@@ -135,5 +135,27 @@ export const testLevel: LevelDefinition = {
   walkableZones: [],
   coverZones: [],
   interactionZones: [],
-  enemySpawnPoints: []
+  enemySpawnPoints: [],
+  enemyPatrols: [
+    {
+      id: "enemy-1",
+      name: "Patrol 1",
+      route: [
+        { x: 670, y: 118 },
+        { x: 880, y: 126 },
+        { x: 860, y: 202 },
+        { x: 650, y: 192 }
+      ]
+    },
+    {
+      id: "enemy-2",
+      name: "Patrol 2",
+      route: [
+        { x: 770, y: 78 },
+        { x: 925, y: 96 },
+        { x: 905, y: 168 },
+        { x: 750, y: 150 }
+      ]
+    }
+  ]
 };

@@ -4,6 +4,7 @@ import type { CharacterId, MovementSpriteManifest } from "./types";
 export interface LoadedCharacterAssets {
   manifest: MovementSpriteManifest;
   images: Record<CharacterId, HTMLImageElement>;
+  enemyImage: HTMLImageElement;
 }
 
 export class AssetLoader {
@@ -25,7 +26,11 @@ export class AssetLoader {
 
     return {
       manifest,
-      images: Object.fromEntries(imageEntries) as Record<CharacterId, HTMLImageElement>
+      images: Object.fromEntries(imageEntries) as Record<CharacterId, HTMLImageElement>,
+      enemyImage: await this.loadImage(
+        "enemy",
+        `${ASSET_BASE_PATH}enemy_movement_8dir_6frames_v5_matched_to_alyosha.png`
+      )
     };
   }
 

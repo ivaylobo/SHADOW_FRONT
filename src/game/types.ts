@@ -5,6 +5,8 @@ export interface WorldPoint {
 
 export type CharacterId = "maya" | "alyosha";
 
+export type EnemyId = "enemy-1" | "enemy-2";
+
 export type Direction =
   | "left"
   | "right"

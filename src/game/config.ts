@@ -13,6 +13,11 @@ export const GAME_CONFIG = {
   renderScale: 0.46,
   arrivalThreshold: 5,
   collisionRadius: 14,
+  characterBodyCollisionWidthRatio: 0.34,
+  characterBodyCollisionTopRatio: 0.76,
+  characterBodyCollisionBottomRatio: 0.32,
+  characterBodyFootInset: 7,
+  enemyCollisionRadius: 15,
   cameraFollowSharpness: 7,
   movementSpeeds: {
     walk: 90,
@@ -24,6 +29,21 @@ export const GAME_CONFIG = {
     run: 14,
     crawl: 8
   } satisfies Record<MovingMotion, number>,
+  enemy: {
+    renderScale: 1.46,
+    walkSpeed: 76,
+    runSpeed: 130,
+    walkFps: 10,
+    runFps: 14,
+    shootFps: 12,
+    visionRange: 320,
+    closeVisionRatio: 0.5,
+    baseVisionAngleDegrees: 20,
+    sweepAngleDegrees: 60,
+    sweepPeriodSeconds: 2.4,
+    eyeOffsetY: -78,
+    alarmDuration: 2.8
+  },
   markerDuration: 0.75,
   invalidMarkerDuration: 0.55,
   directions: [
