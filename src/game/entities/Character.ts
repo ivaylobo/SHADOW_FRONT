@@ -184,6 +184,7 @@ export class Character {
       ? this.animator.getSpecialSourceRect(
           this.id,
           this.state.action,
+          this.state.stance,
           this.state.direction,
           this.state.frameIndex
         )

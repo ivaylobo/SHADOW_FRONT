@@ -5,7 +5,8 @@ import type {
   Direction,
   MovingMotion,
   MovementSpriteManifest,
-  SpecialAction
+  SpecialAction,
+  Stance
 } from "../types";
 
 export interface SourceRect {
@@ -67,17 +68,13 @@ export class SpriteAnimator {
   getSpecialSourceRect(
     characterId: CharacterId,
     action: SpecialAction,
+    stance: Stance,
     direction: Direction,
     frameIndex: number
   ): SourceRect {
     const fileInfo = this.manifest.files[characterId];
     const rowCount = fileInfo.rows ?? this.manifest.rows;
-    const row =
-      fileInfo.specialRows?.[action] ??
-      this.manifest.specialRows?.[action] ??
-      this.manifest.specialActions?.[characterId]?.row ??
-      this.manifest.specialRow ??
-      rowCount - 1;
+    const row = this.resolveSpecialRow(characterId, action, stance, rowCount);
 
     if (row < 0 || row >= rowCount) {
       throw new Error(`Invalid sprite special action row: ${action} -> ${row}`);
@@ -109,5 +106,37 @@ export class SpriteAnimator {
 
   private shouldFlipSpecialAction(direction: Direction): boolean {
     return direction === "left" || direction === "up-left" || direction === "down-left";
+  }
+
+  private resolveSpecialRow(
+    characterId: CharacterId,
+    action: SpecialAction,
+    stance: Stance,
+    rowCount: number
+  ): number {
+    const fileInfo = this.manifest.files[characterId];
+    const fileActionRow = fileInfo.specialRows?.[action];
+
+    if (typeof fileActionRow === "number") {
+      return fileActionRow;
+    }
+
+    if (fileActionRow) {
+      return stance === "prone" ? fileActionRow.prone : fileActionRow.upright;
+    }
+
+    const manifestActionRow = this.manifest.specialRows?.[action];
+    if (typeof manifestActionRow === "number") {
+      return manifestActionRow;
+    }
+
+    const characterAction = this.manifest.specialActions?.[characterId];
+    if (characterAction) {
+      return stance === "prone"
+        ? characterAction.proneRow ?? characterAction.row
+        : characterAction.row;
+    }
+
+    return this.manifest.specialRow ?? rowCount - 1;
   }
 }

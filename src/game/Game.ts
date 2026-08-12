@@ -7,6 +7,7 @@ import { Enemy } from "./entities/Enemy";
 import {
   circleIntersectsPolygon,
   distance,
+  distanceToSegment,
   getMaxY,
   getPolygonCenter,
   isInsideWorld,
@@ -287,15 +288,20 @@ export class Game {
       return;
     }
 
-    const shotTarget = this.getShotTarget(character);
+    const shotOrigin = this.getShotOrigin(character);
+    const shotTarget = this.getShotTarget(character, shotOrigin);
+    const shotHit = this.findShotHit(shotOrigin, shotTarget);
+    const traceTarget = shotHit?.point ?? shotTarget;
 
     character.startSpecialAction("shoot", shotTarget);
     this.shotTraces.push({
-      from: { ...character.state.position },
-      to: { ...shotTarget },
+      from: shotOrigin,
+      to: traceTarget,
       age: 0,
       duration: 0.18
     });
+
+    shotHit?.enemy.neutralize();
   }
 
   private handleKeyDown(key: string, code: string): void {
@@ -357,7 +363,7 @@ export class Game {
 
   private updateEnemyDetection(): void {
     for (const enemy of this.enemies.values()) {
-      if (enemy.state === "shooting") {
+      if (enemy.state === "shooting" || enemy.state === "neutralized") {
         continue;
       }
 
@@ -405,6 +411,54 @@ export class Game {
     }
 
     return character.state.stance !== "prone";
+  }
+
+  private findShotHit(from: WorldPoint, to: WorldPoint): { enemy: Enemy; point: WorldPoint } | null {
+    const segment = { x: to.x - from.x, y: to.y - from.y };
+    const lengthSq = segment.x * segment.x + segment.y * segment.y;
+
+    if (lengthSq < 0.001) {
+      return null;
+    }
+
+    let nearestHit: { enemy: Enemy; point: WorldPoint; distanceFromShooter: number } | null = null;
+
+    for (const enemy of this.enemies.values()) {
+      if (enemy.state === "neutralized") {
+        continue;
+      }
+
+      const targetPoint = {
+        x: enemy.position.x,
+        y: enemy.position.y + GAME_CONFIG.enemy.hitPointOffsetY
+      };
+      const projection =
+        ((targetPoint.x - from.x) * segment.x + (targetPoint.y - from.y) * segment.y) / lengthSq;
+
+      if (projection < 0 || projection > 1) {
+        continue;
+      }
+
+      if (distanceToSegment(targetPoint, from, to) > GAME_CONFIG.enemy.hitRadius) {
+        continue;
+      }
+
+      if (!this.hasLineOfSight(from, targetPoint)) {
+        continue;
+      }
+
+      const point = {
+        x: from.x + segment.x * projection,
+        y: from.y + segment.y * projection
+      };
+      const distanceFromShooter = distance(from, point);
+
+      if (!nearestHit || distanceFromShooter < nearestHit.distanceFromShooter) {
+        nearestHit = { enemy, point, distanceFromShooter };
+      }
+    }
+
+    return nearestHit ? { enemy: nearestHit.enemy, point: nearestHit.point } : null;
   }
 
   private triggerAlarm(source: Enemy): void {
@@ -476,14 +530,13 @@ export class Game {
     );
   }
 
-  private getShotTarget(character: Character): WorldPoint {
+  private getShotTarget(character: Character, origin: WorldPoint): WorldPoint {
     const range = GAME_CONFIG.specialActions.shoot.range;
-    const origin = character.state.position;
-    const aimPoint = this.cursorWorld ?? this.getPointAhead(character, range);
+    const aimPoint = this.cursorWorld ?? this.getPointAhead(character, range, origin);
     const aimDistance = distance(origin, aimPoint);
 
     if (aimDistance < 0.001) {
-      return this.getPointAhead(character, range);
+      return this.getPointAhead(character, range, origin);
     }
 
     const clampedDistance = Math.min(aimDistance, range);
@@ -495,12 +548,19 @@ export class Game {
     };
   }
 
-  private getPointAhead(character: Character, length: number): WorldPoint {
+  private getShotOrigin(character: Character): WorldPoint {
+    return {
+      x: character.state.position.x,
+      y: character.state.position.y + (character.state.stance === "prone" ? -18 : -42)
+    };
+  }
+
+  private getPointAhead(character: Character, length: number, origin = character.state.position): WorldPoint {
     const vector = this.getDirectionVector(character.state.direction);
 
     return {
-      x: character.state.position.x + vector.x * length,
-      y: character.state.position.y + vector.y * length
+      x: origin.x + vector.x * length,
+      y: origin.y + vector.y * length
     };
   }
 
@@ -669,7 +729,7 @@ export class Game {
       this.ctx.strokeStyle = "#f5d46b";
       this.ctx.lineWidth = 3;
       this.ctx.beginPath();
-      this.ctx.moveTo(trace.from.x, trace.from.y - 34);
+      this.ctx.moveTo(trace.from.x, trace.from.y);
       this.ctx.lineTo(trace.to.x, trace.to.y);
       this.ctx.stroke();
       this.ctx.restore();
@@ -692,6 +752,10 @@ export class Game {
 
   private drawEnemyVision(): void {
     for (const enemy of this.enemies.values()) {
+      if (enemy.state === "neutralized") {
+        continue;
+      }
+
       const cone = this.buildDetectionCone(enemy);
 
       this.ctx.save();

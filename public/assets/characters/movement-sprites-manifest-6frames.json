@@ -1,11 +1,11 @@
 {
   "format": "sprite-sheet-v1",
   "columns": 6,
-  "rows": 25,
-  "frameWidth": 192,
-  "frameHeight": 256,
-  "sheetWidth": 1152,
-  "sheetHeight": 6400,
+  "rows": 26,
+  "frameWidth": 61.333333333333336,
+  "frameHeight": 81.92307692307692,
+  "sheetWidth": 368,
+  "sheetHeight": 2130,
   "framesPerAnimation": 6,
   "movementRows": 24,
   "specialRow": 24,
@@ -50,26 +50,33 @@
     "crawl-up-right",
     "crawl-down-left",
     "crawl-down-right",
-    "special-action"
+    "special-upright",
+    "special-prone"
   ],
   "specialActions": {
     "maya": {
       "name": "take-photo",
-      "row": 24
+      "row": 24,
+      "proneRow": 25
     },
     "alyosha": {
       "name": "shoot-kalashnikov",
-      "row": 24
+      "row": 24,
+      "proneRow": 25
     }
   },
   "files": {
     "maya": {
-      "file": "maya_movement_8dir_6frames_v9_aligned_photo.png",
-      "sha256": "6149906bd6d73d5bbac79b9ec2edc76c02e943db2a127b90630beb29c89eb3f1"
+      "file": "maya_movement_8dir_6frames_v10_prone_photo.png",
+      "sha256": "7570d305a204b7fb1ce238b7b3ea6dabc1693412a18db849ceda170515b28338",
+      "rows": 26,
+      "sheetHeight": 2130
     },
     "alyosha": {
-      "file": "alyosha_movement_8dir_6frames_v6_shoot_fixed.png",
-      "sha256": "ee7207821824ccbeebee7204e5ba37a6a56f7e60b705141396b328c5c20d5a8e"
+      "file": "alyosha_movement_8dir_6frames_v7_prone_shoot.png",
+      "sha256": "873fb7f7add2bbd93880a6a2369e9ddd161b8c44398e3fa41a8ccb6d1e6884fa",
+      "rows": 26,
+      "sheetHeight": 2130
     }
   }
 }

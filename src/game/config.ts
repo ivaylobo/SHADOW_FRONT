@@ -10,7 +10,7 @@ export const SPRITE_MANIFEST_PATH = `${ASSET_BASE_PATH}movement-sprites-manifest
 
 export const GAME_CONFIG = {
   uiPanelWidth: 286,
-  renderScale: 0.46,
+  renderScale: 1.46,
   arrivalThreshold: 5,
   collisionRadius: 14,
   characterBodyCollisionWidthRatio: 0.34,
@@ -42,6 +42,8 @@ export const GAME_CONFIG = {
     sweepAngleDegrees: 60,
     sweepPeriodSeconds: 2.4,
     eyeOffsetY: -78,
+    hitPointOffsetY: -46,
+    hitRadius: 28,
     alarmDuration: 2.8
   },
   markerDuration: 0.75,
@@ -78,6 +80,8 @@ export const GAME_CONFIG = {
       "down-right": { rowOffset: 6, flipX: true }
     },
     crawl: {
+      left: { rowOffset: 0, flipX: false },
+      right: { rowOffset: 1, flipX: false },
       "up-left": { rowOffset: 4, flipX: false },
       "up-right": { rowOffset: 4, flipX: true }
     }
@@ -86,7 +90,7 @@ export const GAME_CONFIG = {
     shoot: {
       fps: 12,
       duration: 0.55,
-      range: 420
+      range: 320
     },
     photo: {
       fps: 10,

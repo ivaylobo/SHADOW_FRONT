@@ -52,7 +52,7 @@ export interface MovementSpriteManifest {
   rowFormula: string;
   rowOrder: string[];
   specialRows?: Partial<Record<SpecialAction, number>>;
-  specialActions?: Record<CharacterId, { name: string; row: number }>;
+  specialActions?: Record<CharacterId, { name: string; row: number; proneRow?: number }>;
   files: Record<
     CharacterId,
     {
@@ -60,7 +60,7 @@ export interface MovementSpriteManifest {
       sha256: string;
       rows?: number;
       sheetHeight?: number;
-      specialRows?: Partial<Record<SpecialAction, number>>;
+      specialRows?: Partial<Record<SpecialAction, number | { upright: number; prone: number }>>;
     }
   >;
 }
