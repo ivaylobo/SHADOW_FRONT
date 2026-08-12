@@ -1,0 +1,75 @@
+{
+  "format": "sprite-sheet-v1",
+  "columns": 6,
+  "rows": 25,
+  "frameWidth": 192,
+  "frameHeight": 256,
+  "sheetWidth": 1152,
+  "sheetHeight": 6400,
+  "framesPerAnimation": 6,
+  "movementRows": 24,
+  "specialRow": 24,
+  "motions": [
+    "walk",
+    "run",
+    "crawl"
+  ],
+  "directions": [
+    "left",
+    "right",
+    "up",
+    "down",
+    "up-left",
+    "up-right",
+    "down-left",
+    "down-right"
+  ],
+  "rowFormula": "movementRow = motions.indexOf(motion) * 8 + directions.indexOf(direction)",
+  "rowOrder": [
+    "walk-left",
+    "walk-right",
+    "walk-up",
+    "walk-down",
+    "walk-up-left",
+    "walk-up-right",
+    "walk-down-left",
+    "walk-down-right",
+    "run-left",
+    "run-right",
+    "run-up",
+    "run-down",
+    "run-up-left",
+    "run-up-right",
+    "run-down-left",
+    "run-down-right",
+    "crawl-left",
+    "crawl-right",
+    "crawl-up",
+    "crawl-down",
+    "crawl-up-left",
+    "crawl-up-right",
+    "crawl-down-left",
+    "crawl-down-right",
+    "special-action"
+  ],
+  "specialActions": {
+    "maya": {
+      "name": "take-photo",
+      "row": 24
+    },
+    "alyosha": {
+      "name": "shoot-kalashnikov",
+      "row": 24
+    }
+  },
+  "files": {
+    "maya": {
+      "file": "maya_movement_8dir_6frames_v9_aligned_photo.png",
+      "sha256": "6149906bd6d73d5bbac79b9ec2edc76c02e943db2a127b90630beb29c89eb3f1"
+    },
+    "alyosha": {
+      "file": "alyosha_movement_8dir_6frames_v6_shoot_fixed.png",
+      "sha256": "ee7207821824ccbeebee7204e5ba37a6a56f7e60b705141396b328c5c20d5a8e"
+    }
+  }
+}

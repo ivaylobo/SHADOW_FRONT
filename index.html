@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="bg">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shadow Front Prototype</title>
+  </head>
+  <body>
+    <div id="app">
+      <main id="game-shell" aria-label="Игрова зона">
+        <canvas id="game-canvas"></canvas>
+      </main>
+      <aside id="side-panel" aria-label="Интерфейс">
+        <section class="panel-section status-section">
+          <p class="label">Избран герой</p>
+          <h1 id="selected-name">-</h1>
+          <dl class="status-grid">
+            <div>
+              <dt>Стойка</dt>
+              <dd id="selected-stance">-</dd>
+            </div>
+            <div>
+              <dt>Движение</dt>
+              <dd id="selected-motion">-</dd>
+            </div>
+            <div>
+              <dt>Цел</dt>
+              <dd id="selected-target">-</dd>
+            </div>
+          </dl>
+        </section>
+
+        <details class="panel-section controls-section">
+          <summary>Управление</summary>
+          <ul id="controls-list" class="controls-list"></ul>
+        </details>
+
+        <section id="debug-panel" class="panel-section debug-section" hidden>
+          <p class="label">Debug</p>
+          <pre id="debug-readout"></pre>
+        </section>
+      </aside>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
