@@ -1,11 +1,11 @@
 {
   "format": "sprite-sheet-v1",
   "columns": 6,
-  "rows": 26,
-  "frameWidth": 61.333333333333336,
-  "frameHeight": 81.92307692307692,
-  "sheetWidth": 368,
-  "sheetHeight": 2130,
+  "rows": 27,
+  "frameWidth": 58.833333333333336,
+  "frameHeight": 78.77777777777777,
+  "sheetWidth": 353,
+  "sheetHeight": 2127,
   "framesPerAnimation": 6,
   "movementRows": 24,
   "specialRow": 24,
@@ -51,8 +51,12 @@
     "crawl-down-left",
     "crawl-down-right",
     "special-upright",
-    "special-prone"
+    "special-prone",
+    "special-tie"
   ],
+  "specialRows": {
+    "tie": 26
+  },
   "specialActions": {
     "maya": {
       "name": "take-photo",
@@ -67,16 +71,30 @@
   },
   "files": {
     "maya": {
-      "file": "maya_movement_8dir_6frames_v10_prone_photo.png",
-      "sha256": "7570d305a204b7fb1ce238b7b3ea6dabc1693412a18db849ceda170515b28338",
-      "rows": 26,
-      "sheetHeight": 2130
+      "file": "maya_movement_8dir_6frames_v11_tie.png",
+      "sha256": "93215ba850cb0b4a73ab200eb9c2a1ac9e9873060108f9c840d7e65208bd13c4",
+      "rows": 27,
+      "sheetHeight": 2127,
+      "specialRows": {
+        "photo": {
+          "upright": 24,
+          "prone": 25
+        },
+        "tie": 26
+      }
     },
     "alyosha": {
-      "file": "alyosha_movement_8dir_6frames_v7_prone_shoot.png",
-      "sha256": "873fb7f7add2bbd93880a6a2369e9ddd161b8c44398e3fa41a8ccb6d1e6884fa",
-      "rows": 26,
-      "sheetHeight": 2130
+      "file": "alyosha_movement_8dir_6frames_v8_tie.png",
+      "sha256": "126a662a77844787db2b2db8aa52efe6d14eaeb6ba4e3b035aa8352675d1c48b",
+      "rows": 27,
+      "sheetHeight": 2127,
+      "specialRows": {
+        "shoot": {
+          "upright": 24,
+          "prone": 25
+        },
+        "tie": 26
+      }
     }
   }
 }

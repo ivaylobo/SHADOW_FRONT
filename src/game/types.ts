@@ -23,7 +23,7 @@ export type MovingMotion = "walk" | "run" | "crawl";
 
 export type Motion = "idle" | MovingMotion;
 
-export type SpecialAction = "shoot" | "photo";
+export type SpecialAction = "shoot" | "photo" | "tie";
 
 export interface CharacterState {
   position: WorldPoint;

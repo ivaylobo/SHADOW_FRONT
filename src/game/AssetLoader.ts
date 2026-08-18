@@ -1,4 +1,4 @@
-import { ASSET_BASE_PATH, SPRITE_MANIFEST_PATH } from "./config";
+import { ASSET_BASE_PATH, GAME_CONFIG, SPRITE_MANIFEST_PATH } from "./config";
 import type { CharacterId, MovementSpriteManifest } from "./types";
 
 export interface LoadedCharacterAssets {
@@ -29,7 +29,7 @@ export class AssetLoader {
       images: Object.fromEntries(imageEntries) as Record<CharacterId, HTMLImageElement>,
       enemyImage: await this.loadImage(
         "enemy",
-        `${ASSET_BASE_PATH}enemy_movement_8dir_6frames_v5_matched_to_alyosha.png`
+        `${ASSET_BASE_PATH}${GAME_CONFIG.enemy.sprite.file}`
       )
     };
   }

@@ -30,6 +30,15 @@ export const GAME_CONFIG = {
     crawl: 8
   } satisfies Record<MovingMotion, number>,
   enemy: {
+    sprite: {
+      file: "enemy_movement_8dir_6frames_v6_bound.png",
+      columns: 6,
+      rows: 26,
+      sheetWidth: 368,
+      sheetHeight: 2130,
+      shootRow: 24,
+      boundRow: 25
+    },
     renderScale: 1.46,
     walkSpeed: 76,
     runSpeed: 130,
@@ -45,6 +54,10 @@ export const GAME_CONFIG = {
     hitPointOffsetY: -46,
     hitRadius: 28,
     alarmDuration: 2.8
+  },
+  tie: {
+    walkSpeed: 86,
+    catchRange: 30
   },
   markerDuration: 0.75,
   invalidMarkerDuration: 0.55,
@@ -96,6 +109,11 @@ export const GAME_CONFIG = {
       fps: 10,
       duration: 0.7,
       range: 96
+    },
+    tie: {
+      fps: 10,
+      duration: 0.8,
+      range: 30
     }
   } satisfies Record<
     SpecialAction,
@@ -104,6 +122,10 @@ export const GAME_CONFIG = {
 } as const;
 
 export const CONTROL_HELP: ControlHelpItem[] = [
+  {
+    command: "Hover + клик върху враг",
+    description: "героят следва врага и го връзва с въже, ако го настигне"
+  },
   {
     command: "Ляв клик върху герой",
     description: "избира героя"

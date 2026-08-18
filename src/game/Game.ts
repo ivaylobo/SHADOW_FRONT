@@ -60,6 +60,10 @@ interface DetectionCone {
   far: WorldPoint[];
 }
 
+interface TieAttempt {
+  enemyId: EnemyId;
+}
+
 export class Game {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly level = testLevel;
@@ -85,6 +89,8 @@ export class Game {
   private shotTraces: ShotTrace[] = [];
   private photoFlashes: PhotoFlash[] = [];
   private alarmFlash: AlarmFlash | null = null;
+  private elapsedTime = 0;
+  private readonly tieAttempts = new Map<CharacterId, TieAttempt>();
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -146,6 +152,7 @@ export class Game {
         onCanvasCommand: (command) => this.handleCanvasCommand(command),
         onCursorMove: (worldPosition) => {
           this.cursorWorld = worldPosition;
+          this.updateCanvasCursor();
         },
         onKeyDown: (key, code) => this.handleKeyDown(key, code)
       });
@@ -166,6 +173,9 @@ export class Game {
   }
 
   private update(deltaTime: number): void {
+    this.elapsedTime += deltaTime;
+    this.syncTieAttemptTargets();
+
     for (const character of this.characters.values()) {
       if (character.hasActiveWork()) {
         character.update(deltaTime, (movingCharacter, position) =>
@@ -179,6 +189,7 @@ export class Game {
         this.isEnemyPositionWalkable(position, radius)
       );
     }
+    this.updateTieAttempts();
     this.updateEnemyDetection();
 
     this.markers = this.markers
@@ -227,6 +238,7 @@ export class Game {
     this.drawEnemyVision();
     this.drawSortedRenderables();
     this.drawSpecialEffects();
+    this.drawTiePrompts();
     this.drawMayaPhotoPrompt();
 
     if (this.debugEnabled) {
@@ -248,20 +260,33 @@ export class Game {
       this.selectCharacter(clickedCharacter.id);
       if (clickedCharacter.state.targetPosition) {
         clickedCharacter.stop();
+        this.tieAttempts.delete(clickedCharacter.id);
       }
       return;
     }
 
     const selectedCharacter = this.getSelectedCharacter();
+    const clickedEnemy = this.findEnemyAt(command.worldPosition);
 
-    if (!this.isCharacterPositionWalkable(selectedCharacter, command.worldPosition)) {
-      this.addMarker(command.worldPosition, "invalid");
+    if (clickedEnemy) {
+      if (!this.startTieAttempt(selectedCharacter, clickedEnemy)) {
+        this.addMarker(clickedEnemy.position, "invalid");
+        return;
+      }
+
+      this.addMarker(clickedEnemy.position, "target");
       return;
     }
 
     const requestedMotion: TerrainMotion =
       command.shiftKey || command.isDoubleClick ? "run" : "walk";
 
+    if (!this.isCharacterPositionWalkable(selectedCharacter, command.worldPosition)) {
+      this.addMarker(command.worldPosition, "invalid");
+      return;
+    }
+
+    this.tieAttempts.delete(selectedCharacter.id);
     selectedCharacter.setTarget(command.worldPosition, requestedMotion);
     this.addMarker(command.worldPosition, "target");
   }
@@ -272,6 +297,8 @@ export class Game {
     if (character.state.action) {
       return;
     }
+
+    this.tieAttempts.delete(character.id);
 
     if (character.id === "maya") {
       if (!this.isMayaNearPhotoArtifact()) {
@@ -328,7 +355,9 @@ export class Game {
     }
 
     if (normalizedKey === "escape" || code === "Escape") {
-      this.getSelectedCharacter().stop();
+      const character = this.getSelectedCharacter();
+      character.stop();
+      this.tieAttempts.delete(character.id);
       return;
     }
 
@@ -361,9 +390,132 @@ export class Game {
     return charactersFrontToBack.find((character) => character.containsWorldPoint(point)) ?? null;
   }
 
+  private findEnemyAt(point: WorldPoint): Enemy | null {
+    const enemiesFrontToBack = [...this.enemies.values()].sort(
+      (a, b) => b.position.y - a.position.y
+    );
+
+    return enemiesFrontToBack.find((enemy) => enemy.containsWorldPoint(point)) ?? null;
+  }
+
+  private getHoveredTieEnemy(): Enemy | null {
+    if (!this.cursorWorld || this.findCharacterAt(this.cursorWorld)) {
+      return null;
+    }
+
+    const enemy = this.findEnemyAt(this.cursorWorld);
+    return enemy && !this.isEnemyUnavailableForTie(enemy) ? enemy : null;
+  }
+
+  private updateCanvasCursor(): void {
+    this.canvas.style.cursor = this.getHoveredTieEnemy() ? "pointer" : "crosshair";
+  }
+
+  private startTieAttempt(character: Character, enemy: Enemy): boolean {
+    if (character.state.stance !== "upright") {
+      return false;
+    }
+
+    if (this.isEnemyUnavailableForTie(enemy)) {
+      return false;
+    }
+
+    this.tieAttempts.set(character.id, {
+      enemyId: enemy.id
+    });
+
+    character.setTarget(enemy.position, "walk", GAME_CONFIG.tie.walkSpeed);
+    return true;
+  }
+
+  private syncTieAttemptTargets(): void {
+    for (const [characterId, attempt] of this.tieAttempts) {
+      const character = this.characters.get(characterId);
+      const enemy = this.enemies.get(attempt.enemyId);
+
+      if (!character || !enemy) {
+        this.tieAttempts.delete(characterId);
+        continue;
+      }
+
+      if (
+        character.state.action ||
+        character.state.stance !== "upright" ||
+        !character.state.targetPosition ||
+        this.isEnemyUnavailableForTie(enemy)
+      ) {
+        character.stop();
+        this.tieAttempts.delete(characterId);
+        continue;
+      }
+
+      character.retarget(enemy.position);
+    }
+  }
+
+  private updateTieAttempts(): void {
+    for (const [characterId, attempt] of this.tieAttempts) {
+      const character = this.characters.get(characterId);
+      const enemy = this.enemies.get(attempt.enemyId);
+
+      if (!character || !enemy) {
+        this.tieAttempts.delete(characterId);
+        continue;
+      }
+
+      if (this.isEnemyUnavailableForTie(enemy)) {
+        character.stop();
+        this.tieAttempts.delete(characterId);
+        continue;
+      }
+
+      if (!character.state.targetPosition) {
+        this.tieAttempts.delete(characterId);
+        continue;
+      }
+
+      const distanceToEnemy = distance(character.state.position, enemy.position);
+
+      if (
+        distanceToEnemy <= GAME_CONFIG.tie.catchRange &&
+        this.hasTieLineOfSight(character, enemy)
+      ) {
+        character.startSpecialAction("tie", enemy.position);
+        enemy.bind();
+        this.tieAttempts.delete(characterId);
+      }
+    }
+  }
+
+  private isEnemyUnavailableForTie(enemy: Enemy): boolean {
+    return enemy.state === "shooting" || enemy.state === "neutralized" || enemy.state === "bound";
+  }
+
+  private hasTieLineOfSight(character: Character, enemy: Enemy): boolean {
+    return this.hasLineOfSight(this.getCharacterSightPoint(character), this.getEnemyTiePoint(enemy));
+  }
+
+  private getCharacterSightPoint(character: Character): WorldPoint {
+    return {
+      x: character.state.position.x,
+      y: character.state.position.y + (character.state.stance === "prone" ? -26 : -42)
+    };
+  }
+
+  private getEnemyTiePoint(enemy: Enemy): WorldPoint {
+    return {
+      x: enemy.position.x,
+      y: enemy.position.y + GAME_CONFIG.enemy.hitPointOffsetY
+    };
+  }
+
   private updateEnemyDetection(): void {
     for (const enemy of this.enemies.values()) {
-      if (enemy.state === "shooting" || enemy.state === "neutralized") {
+      if (
+        enemy.state === "shooting" ||
+        enemy.state === "neutralized" ||
+        enemy.state === "bound"
+      ) {
         continue;
       }
 
@@ -424,7 +576,7 @@ export class Game {
     let nearestHit: { enemy: Enemy; point: WorldPoint; distanceFromShooter: number } | null = null;
 
     for (const enemy of this.enemies.values()) {
-      if (enemy.state === "neutralized") {
+      if (enemy.state === "neutralized" || enemy.state === "bound") {
         continue;
       }
 
@@ -750,9 +902,70 @@ export class Game {
     }
   }
 
+  private drawTiePrompts(): void {
+    const prompts = new Map<EnemyId, { enemy: Enemy; hovered: boolean }>();
+    const hoveredEnemy = this.getHoveredTieEnemy();
+
+    if (hoveredEnemy) {
+      prompts.set(hoveredEnemy.id, { enemy: hoveredEnemy, hovered: true });
+    }
+
+    for (const attempt of this.tieAttempts.values()) {
+      const enemy = this.enemies.get(attempt.enemyId);
+      if (enemy && !this.isEnemyUnavailableForTie(enemy)) {
+        prompts.set(enemy.id, {
+          enemy,
+          hovered: prompts.get(enemy.id)?.hovered ?? false
+        });
+      }
+    }
+
+    for (const prompt of prompts.values()) {
+      this.drawTiePrompt(prompt.enemy, prompt.hovered);
+    }
+  }
+
+  private drawTiePrompt(enemy: Enemy, hovered: boolean): void {
+    const position = enemy.getOverheadPoint();
+    const blink = 0.5 + Math.sin(this.elapsedTime * Math.PI * 4.8) * 0.5;
+    const bob = Math.sin(this.elapsedTime * Math.PI * 2.2) * 2;
+    const alpha = hovered ? 0.35 + blink * 0.65 : 0.48 + blink * 0.18;
+
+    this.ctx.save();
+    this.ctx.translate(position.x, position.y + bob);
+    this.ctx.globalAlpha = alpha;
+    this.ctx.lineCap = "round";
+    this.ctx.lineJoin = "round";
+
+    this.ctx.strokeStyle = "rgba(8, 10, 7, 0.86)";
+    this.ctx.lineWidth = 6;
+    this.strokeRopeIcon();
+
+    this.ctx.strokeStyle = "#eadba8";
+    this.ctx.lineWidth = 3;
+    this.strokeRopeIcon();
+
+    this.ctx.fillStyle = "#eadba8";
+    this.ctx.beginPath();
+    this.ctx.arc(0, 11, 3.5, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.restore();
+  }
+
+  private strokeRopeIcon(): void {
+    this.ctx.beginPath();
+    this.ctx.ellipse(-8, 0, 8, 11, -0.48, 0, Math.PI * 2);
+    this.ctx.ellipse(8, 0, 8, 11, 0.48, 0, Math.PI * 2);
+    this.ctx.moveTo(-18, -10);
+    this.ctx.bezierCurveTo(-10, -18, 10, -18, 18, -10);
+    this.ctx.moveTo(-5, 11);
+    this.ctx.lineTo(5, 11);
+    this.ctx.stroke();
+  }
+
   private drawEnemyVision(): void {
     for (const enemy of this.enemies.values()) {
-      if (enemy.state === "neutralized") {
+      if (enemy.state === "neutralized" || enemy.state === "bound") {
         continue;
       }
 

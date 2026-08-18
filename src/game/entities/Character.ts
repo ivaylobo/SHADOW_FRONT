@@ -29,6 +29,7 @@ export class Character {
   private animationElapsed = 0;
   private actionElapsed = 0;
   private movementIntent: Exclude<MovingMotion, "crawl"> = "walk";
+  private speedOverride: number | null = null;
 
   constructor(options: CharacterOptions) {
     this.id = options.id;
@@ -51,14 +52,25 @@ export class Character {
     this.state.selected = selected;
   }
 
-  setTarget(targetPosition: WorldPoint, requestedMotion: Exclude<MovingMotion, "crawl">): void {
+  setTarget(
+    targetPosition: WorldPoint,
+    requestedMotion: Exclude<MovingMotion, "crawl">,
+    speedOverride: number | null = null
+  ): void {
     this.state.action = null;
     this.actionElapsed = 0;
     this.movementIntent = requestedMotion;
+    this.speedOverride = speedOverride;
     this.state.targetPosition = clonePoint(targetPosition);
     this.state.motion = this.getMotionForCurrentStance();
     this.state.frameIndex = 0;
     this.animationElapsed = 0;
+  }
+
+  retarget(targetPosition: WorldPoint): void {
+    if (this.state.targetPosition) {
+      this.state.targetPosition = clonePoint(targetPosition);
+    }
   }
 
   stop(): void {
@@ -68,6 +80,7 @@ export class Character {
     this.state.frameIndex = 0;
     this.animationElapsed = 0;
     this.actionElapsed = 0;
+    this.speedOverride = null;
   }
 
   startSpecialAction(action: SpecialAction, targetPosition: WorldPoint): void {
@@ -130,7 +143,7 @@ export class Character {
     const currentMotion = this.getMotionForCurrentStance();
     this.state.motion = currentMotion;
 
-    const speed = GAME_CONFIG.movementSpeeds[currentMotion];
+    const speed = this.speedOverride ?? GAME_CONFIG.movementSpeeds[currentMotion];
     const stepDistance = Math.min(speed * deltaTime, remainingDistance);
     const movement = normalize(toTarget);
     const nextPosition = {

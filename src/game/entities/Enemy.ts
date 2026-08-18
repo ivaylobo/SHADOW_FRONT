@@ -2,7 +2,7 @@ import { GAME_CONFIG } from "../config";
 import { clonePoint, directionFromVector, distance, normalize } from "../geometry";
 import type { Direction, EnemyId, MovingMotion, WorldPoint } from "../types";
 
-type EnemyState = "patrol" | "responding" | "shooting" | "neutralized";
+type EnemyState = "patrol" | "responding" | "shooting" | "neutralized" | "bound";
 
 export interface EnemyOptions {
   id: EnemyId;
@@ -21,10 +21,12 @@ export interface EnemyVision {
 }
 
 const ENEMY_SHEET = {
-  columns: 6,
-  rows: 25,
-  frameWidth: 368 / 6,
-  frameHeight: 2048 / 25
+  columns: GAME_CONFIG.enemy.sprite.columns,
+  rows: GAME_CONFIG.enemy.sprite.rows,
+  frameWidth: GAME_CONFIG.enemy.sprite.sheetWidth / GAME_CONFIG.enemy.sprite.columns,
+  frameHeight: GAME_CONFIG.enemy.sprite.sheetHeight / GAME_CONFIG.enemy.sprite.rows,
+  shootRow: GAME_CONFIG.enemy.sprite.shootRow,
+  boundRow: GAME_CONFIG.enemy.sprite.boundRow
 };
 
 const ROW_OFFSETS: Record<Direction, { row: number; flipX: boolean }> = {
@@ -78,7 +80,7 @@ export class Enemy {
   update(deltaTime: number, isWalkable: (position: WorldPoint, radius: number) => boolean): void {
     this.stateElapsed += deltaTime;
 
-    if (this.state === "neutralized") {
+    if (this.state === "neutralized" || this.state === "bound") {
       return;
     }
 
@@ -145,7 +147,12 @@ export class Enemy {
   }
 
   respondTo(enemy: Enemy): void {
-    if (this.state === "shooting" || this.state === "neutralized" || this.id === enemy.id) {
+    if (
+      this.state === "shooting" ||
+      this.state === "neutralized" ||
+      this.state === "bound" ||
+      this.id === enemy.id
+    ) {
       return;
     }
 
@@ -158,6 +165,15 @@ export class Enemy {
 
   neutralize(): void {
     this.state = "neutralized";
+    this.targetPosition = null;
+    this.alertedBy = null;
+    this.frameIndex = 0;
+    this.animationElapsed = 0;
+    this.stateElapsed = 0;
+  }
+
+  bind(): void {
+    this.state = "bound";
     this.targetPosition = null;
     this.alertedBy = null;
     this.frameIndex = 0;
@@ -191,6 +207,14 @@ export class Enemy {
       point.y >= this.position.y - size.height * 0.92 &&
       point.y <= this.position.y + 8
     );
+  }
+
+  getOverheadPoint(): WorldPoint {
+    const size = this.getRenderSize();
+    return {
+      x: this.position.x,
+      y: this.position.y - size.height - 18
+    };
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
@@ -277,7 +301,12 @@ export class Enemy {
   private getSourceRect(): { x: number; y: number; width: number; height: number; flipX: boolean } {
     const motion: MovingMotion = this.state === "shooting" ? "run" : this.state === "responding" ? "run" : "walk";
     const rowRule = ROW_OFFSETS[this.direction];
-    const row = this.state === "shooting" ? 24 : MOTION_ROW_OFFSET[motion] + rowRule.row;
+    const row =
+      this.state === "bound"
+        ? ENEMY_SHEET.boundRow
+        : this.state === "shooting"
+          ? ENEMY_SHEET.shootRow
+          : MOTION_ROW_OFFSET[motion] + rowRule.row;
 
     return {
       x: this.frameIndex * ENEMY_SHEET.frameWidth,
