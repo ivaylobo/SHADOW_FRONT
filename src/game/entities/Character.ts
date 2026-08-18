@@ -1,3 +1,4 @@
+import { Container, Graphics, Rectangle, Sprite, Texture } from "pixi.js";
 import { GAME_CONFIG } from "../config";
 import { clonePoint, directionFromVector, distance, normalize } from "../geometry";
 import type { SpriteAnimator } from "../animation/SpriteAnimator";
@@ -26,6 +27,8 @@ export class Character {
   readonly state: CharacterState;
 
   private readonly animator: SpriteAnimator;
+  private readonly baseTexture: Texture;
+  private readonly frameTextures = new Map<string, Texture>();
   private animationElapsed = 0;
   private actionElapsed = 0;
   private movementIntent: Exclude<MovingMotion, "crawl"> = "walk";
@@ -36,6 +39,7 @@ export class Character {
     this.name = options.name;
     this.image = options.image;
     this.animator = options.animator;
+    this.baseTexture = Texture.from(options.image);
     this.state = {
       position: clonePoint(options.initialPosition),
       targetPosition: null,
@@ -192,7 +196,7 @@ export class Character {
     ];
   }
 
-  draw(ctx: CanvasRenderingContext2D): void {
+  draw(container: Container): void {
     const source = this.state.action
       ? this.animator.getSpecialSourceRect(
           this.id,
@@ -206,90 +210,65 @@ export class Character {
           this.state.direction,
           this.state.frameIndex
         );
-    const size = this.animator.getRenderSize();
-    const drawX = this.state.position.x - size.width / 2;
-    const drawY = this.state.position.y - size.height;
 
     if (this.state.selected) {
-      ctx.save();
-      ctx.fillStyle = "rgba(222, 218, 160, 0.17)";
-      ctx.strokeStyle = "rgba(236, 226, 139, 0.78)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.ellipse(this.state.position.x, this.state.position.y - 4, 28, 10, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    if (source.flipX) {
-      ctx.save();
-      ctx.translate(this.state.position.x, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(
-        this.image,
-        source.x,
-        source.y,
-        source.width,
-        source.height,
-        -size.width / 2,
-        drawY,
-        size.width,
-        size.height
+      container.addChild(
+        new Graphics()
+          .ellipse(this.state.position.x, this.state.position.y - 4, 28, 10)
+          .fill({ color: "#dedaa0", alpha: 0.17 })
+          .stroke({ color: "#ece28b", alpha: 0.78, width: 2 })
       );
-      ctx.restore();
-      return;
     }
 
-    ctx.drawImage(
-      this.image,
-      source.x,
-      source.y,
-      source.width,
-      source.height,
-      drawX,
-      drawY,
-      size.width,
-      size.height
+    const sprite = new Sprite(this.getFrameTexture(source));
+    sprite.anchor.set(0.5, 1);
+    sprite.position.set(this.state.position.x, this.state.position.y);
+    sprite.scale.set(
+      source.flipX ? -GAME_CONFIG.renderScale : GAME_CONFIG.renderScale,
+      GAME_CONFIG.renderScale
     );
+    container.addChild(sprite);
   }
 
-  drawDebug(ctx: CanvasRenderingContext2D): void {
-    ctx.save();
-    ctx.strokeStyle = "rgba(90, 204, 255, 0.9)";
-    ctx.fillStyle = "rgba(90, 204, 255, 0.9)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(this.state.position.x, this.state.position.y, 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(
-      this.state.position.x,
-      this.state.position.y,
-      GAME_CONFIG.collisionRadius,
-      0,
-      Math.PI * 2
-    );
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(255, 220, 90, 0.88)";
-    ctx.beginPath();
+  drawDebug(container: Container): void {
+    const graphics = new Graphics()
+      .circle(this.state.position.x, this.state.position.y, 3)
+      .fill({ color: "#5accff", alpha: 0.9 })
+      .circle(this.state.position.x, this.state.position.y, GAME_CONFIG.collisionRadius)
+      .stroke({ color: "#5accff", alpha: 0.9, width: 1.5 });
     const bodyPolygon = this.getBodyCollisionPolygon();
-    ctx.moveTo(bodyPolygon[0].x, bodyPolygon[0].y);
-    for (let index = 1; index < bodyPolygon.length; index += 1) {
-      ctx.lineTo(bodyPolygon[index].x, bodyPolygon[index].y);
-    }
-    ctx.closePath();
-    ctx.stroke();
+    graphics.poly(bodyPolygon, true).stroke({ color: "#ffdc5a", alpha: 0.88, width: 1.5 });
 
     if (this.state.targetPosition) {
-      ctx.strokeStyle = "rgba(246, 218, 115, 0.9)";
-      ctx.beginPath();
-      ctx.moveTo(this.state.position.x, this.state.position.y);
-      ctx.lineTo(this.state.targetPosition.x, this.state.targetPosition.y);
-      ctx.stroke();
+      graphics
+        .moveTo(this.state.position.x, this.state.position.y)
+        .lineTo(this.state.targetPosition.x, this.state.targetPosition.y)
+        .stroke({ color: "#f6da73", alpha: 0.9, width: 1.5 });
     }
 
-    ctx.restore();
+    container.addChild(graphics);
+  }
+
+  private getFrameTexture(source: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }): Texture {
+    const key = `${source.x}:${source.y}:${source.width}:${source.height}`;
+    const cached = this.frameTextures.get(key);
+
+    if (cached) {
+      return cached;
+    }
+
+    const texture = new Texture({
+      source: this.baseTexture.source,
+      frame: new Rectangle(source.x, source.y, source.width, source.height)
+    });
+    this.frameTextures.set(key, texture);
+
+    return texture;
   }
 
   private getMotionForCurrentStance(): MovingMotion {

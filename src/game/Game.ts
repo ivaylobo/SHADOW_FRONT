@@ -1,3 +1,4 @@
+import { Graphics, Text } from "pixi.js";
 import { SpriteAnimator } from "./animation/SpriteAnimator";
 import { AssetLoader } from "./AssetLoader";
 import { Camera } from "./Camera";
@@ -20,6 +21,7 @@ import { GameLoop } from "./GameLoop";
 import { InputManager, type CanvasCommand } from "./InputManager";
 import type { CollisionPolygon, ObliquePrism } from "./levels/LevelDefinition";
 import { testLevel } from "./levels/testLevel";
+import { PixiGameRenderer } from "./rendering/PixiGameRenderer";
 import type { CharacterId, Direction, EnemyId, MovingMotion, WorldPoint } from "./types";
 import { ControlsPanel } from "./ui/ControlsPanel";
 
@@ -65,10 +67,10 @@ interface TieAttempt {
 }
 
 export class Game {
-  private readonly ctx: CanvasRenderingContext2D;
   private readonly level = testLevel;
   private readonly assetLoader = new AssetLoader();
   private readonly camera = new Camera(testLevel.worldSize);
+  private readonly renderer: PixiGameRenderer;
   private readonly controlsPanel: ControlsPanel;
   private readonly loop = new GameLoop();
   private readonly characters = new Map<CharacterId, Character>();
@@ -82,7 +84,6 @@ export class Game {
   private inputManager: InputManager | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private viewport: Size = { width: 1, height: 1 };
-  private pixelRatio = 1;
   private debugEnabled = false;
   private cursorWorld: WorldPoint | null = null;
   private markers: Marker[] = [];
@@ -96,18 +97,13 @@ export class Game {
     private canvas: HTMLCanvasElement,
     sidePanel: HTMLElement
   ) {
-    const context = this.canvas.getContext("2d");
-
-    if (!context) {
-      throw new Error("Canvas 2D context is not available.");
-    }
-
-    this.ctx = context;
+    this.renderer = new PixiGameRenderer(canvas);
     this.controlsPanel = new ControlsPanel(sidePanel);
     window.addEventListener("beforeunload", this.dispose);
   }
 
   async start(): Promise<void> {
+    await this.renderer.init();
     this.resizeCanvas();
     this.renderMessage("Зареждане на спрайтове...");
 
@@ -157,7 +153,7 @@ export class Game {
         onKeyDown: (key, code) => this.handleKeyDown(key, code)
       });
       this.resizeObserver = new ResizeObserver(this.resizeCanvas);
-      this.resizeObserver.observe(this.canvas);
+      this.resizeObserver.observe(this.canvas.parentElement ?? this.canvas);
       window.addEventListener("resize", this.resizeCanvas);
       this.loop.start((deltaTime) => this.frame(deltaTime));
     } catch (error) {
@@ -227,12 +223,7 @@ export class Game {
   }
 
   private render(): void {
-    this.prepareContext();
-    this.ctx.fillStyle = "#0c0f0a";
-    this.ctx.fillRect(0, 0, this.viewport.width, this.viewport.height);
-
-    this.ctx.save();
-    this.ctx.translate(-this.camera.position.x, -this.camera.position.y);
+    this.prepareScene();
     this.drawLevelBase();
     this.drawMarkers();
     this.drawEnemyVision();
@@ -245,12 +236,11 @@ export class Game {
       this.drawWorldDebug();
     }
 
-    this.ctx.restore();
-
     if (this.debugEnabled) {
       this.drawScreenDebug();
     }
     this.drawAlarmIndicator();
+    this.renderer.render();
   }
 
   private handleCanvasCommand(command: CanvasCommand): void {
@@ -751,56 +741,59 @@ export class Game {
 
   private drawLevelBase(): void {
     const { width, height } = this.level.worldSize;
-    const gradient = this.ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, "#28351f");
-    gradient.addColorStop(0.48, "#26301f");
-    gradient.addColorStop(1, "#30321f");
+    const graphics = new Graphics();
+    this.renderer.layers.background.addChild(graphics);
 
-    this.ctx.fillStyle = gradient;
-    this.ctx.fillRect(0, 0, width, height);
-
-    this.ctx.save();
-    this.ctx.globalAlpha = 0.25;
-    this.ctx.strokeStyle = "#58644b";
-    this.ctx.lineWidth = 1;
+    graphics.rect(0, 0, width, height).fill("#28351f");
+    graphics.rect(0, Math.floor(height * 0.32), width, Math.ceil(height * 0.36)).fill({
+      color: "#26301f",
+      alpha: 0.72
+    });
+    graphics.rect(0, Math.floor(height * 0.66), width, Math.ceil(height * 0.34)).fill({
+      color: "#30321f",
+      alpha: 0.78
+    });
 
     for (let y = -220; y < height + 220; y += 95) {
-      this.ctx.beginPath();
-      this.ctx.moveTo(-40, y);
-      this.ctx.lineTo(width + 40, y + 210);
-      this.ctx.stroke();
+      graphics
+        .moveTo(-40, y)
+        .lineTo(width + 40, y + 210)
+        .stroke({ color: "#58644b", alpha: 0.25, width: 1 });
     }
 
-    this.ctx.globalAlpha = 0.18;
-    this.ctx.strokeStyle = "#11160f";
     for (let x = 120; x < width; x += 180) {
-      this.ctx.beginPath();
-      this.ctx.moveTo(x, 0);
-      this.ctx.lineTo(x - 140, height);
-      this.ctx.stroke();
+      graphics
+        .moveTo(x, 0)
+        .lineTo(x - 140, height)
+        .stroke({ color: "#11160f", alpha: 0.18, width: 1 });
     }
-    this.ctx.restore();
 
-    this.ctx.fillStyle = "rgba(83, 69, 43, 0.22)";
-    this.drawPolygon([
-      { x: 170, y: 690 },
-      { x: 530, y: 650 },
-      { x: 585, y: 720 },
-      { x: 250, y: 790 }
-    ]);
-    this.drawPolygon([
-      { x: 1110, y: 210 },
-      { x: 1560, y: 250 },
-      { x: 1515, y: 335 },
-      { x: 1085, y: 310 }
-    ]);
+    this.fillPolygon(
+      graphics,
+      [
+        { x: 170, y: 690 },
+        { x: 530, y: 650 },
+        { x: 585, y: 720 },
+        { x: 250, y: 790 }
+      ],
+      "#53452b",
+      0.22
+    );
+    this.fillPolygon(
+      graphics,
+      [
+        { x: 1110, y: 210 },
+        { x: 1560, y: 250 },
+        { x: 1515, y: 335 },
+        { x: 1085, y: 310 }
+      ],
+      "#53452b",
+      0.22
+    );
 
-    this.ctx.strokeStyle = "#10140d";
-    this.ctx.lineWidth = 6;
-    this.ctx.strokeRect(0, 0, width, height);
-    this.ctx.fillStyle = "rgba(15, 18, 12, 0.42)";
-    this.ctx.fillRect(0, height - 18, width, 18);
-    this.ctx.fillRect(width - 18, 0, 18, height);
+    graphics.rect(0, 0, width, height).stroke({ color: "#10140d", width: 6 });
+    graphics.rect(0, height - 18, width, 18).fill({ color: "#0f120c", alpha: 0.42 });
+    graphics.rect(width - 18, 0, 18, height).fill({ color: "#0f120c", alpha: 0.42 });
   }
 
   private drawSortedRenderables(): void {
@@ -811,7 +804,7 @@ export class Game {
       })),
       ...[...this.enemies.values()].map((enemy) => ({
         sortY: enemy.position.y,
-        draw: () => enemy.draw(this.ctx)
+        draw: () => enemy.draw(this.renderer.layers.sorted)
       })),
       {
         sortY: this.photoArtifact.position.y,
@@ -819,7 +812,7 @@ export class Game {
       },
       ...[...this.characters.values()].map((character) => ({
         sortY: character.state.position.y,
-        draw: () => character.draw(this.ctx)
+        draw: () => character.draw(this.renderer.layers.sorted)
       }))
     ];
 
@@ -831,74 +824,57 @@ export class Game {
   }
 
   private drawFlatObstacle(object: ObliquePrism): void {
-    this.ctx.save();
-    this.ctx.fillStyle = "rgba(76, 86, 66, 0.94)";
-    this.drawPolygon(object.footprint);
-    this.ctx.strokeStyle = object.strokeColor;
-    this.ctx.lineWidth = 2;
-    this.strokePolygon(object.footprint);
+    const graphics = new Graphics();
+    this.renderer.layers.sorted.addChild(graphics);
+    this.fillPolygon(graphics, object.footprint, "#4c5642", 0.94);
+    this.strokePolygon(graphics, object.footprint, object.strokeColor, 2);
 
     const center = getPolygonCenter(object.footprint);
-    this.ctx.fillStyle = "rgba(18, 23, 15, 0.16)";
-    this.ctx.beginPath();
-    this.ctx.ellipse(center.x, center.y, 18, 8, 0, 0, Math.PI * 2);
-    this.ctx.fill();
-    this.ctx.restore();
+    graphics.ellipse(center.x, center.y, 18, 8).fill({ color: "#12170f", alpha: 0.16 });
   }
 
   private drawPhotoArtifact(): void {
     const { position, radius } = this.photoArtifact;
+    const graphics = new Graphics();
+    this.renderer.layers.sorted.addChild(graphics);
 
-    this.ctx.save();
-    this.ctx.fillStyle = "#4e5a68";
-    this.ctx.strokeStyle = "#151b21";
-    this.ctx.lineWidth = 2;
-    this.ctx.beginPath();
-    this.ctx.ellipse(position.x, position.y, radius, radius * 0.62, 0, 0, Math.PI * 2);
-    this.ctx.fill();
-    this.ctx.stroke();
-
-    this.ctx.fillStyle = "#87919c";
-    this.ctx.beginPath();
-    this.ctx.ellipse(position.x, position.y - 12, radius * 0.68, radius * 0.38, 0, 0, Math.PI * 2);
-    this.ctx.fill();
-    this.ctx.stroke();
-
-    this.ctx.strokeStyle = this.isMayaNearPhotoArtifact() ? "#f0e58f" : "rgba(240, 229, 143, 0.38)";
-    this.ctx.setLineDash([5, 6]);
-    this.ctx.beginPath();
-    this.ctx.arc(position.x, position.y, this.photoArtifact.interactionRange, 0, Math.PI * 2);
-    this.ctx.stroke();
-    this.ctx.restore();
+    graphics
+      .ellipse(position.x, position.y, radius, radius * 0.62)
+      .fill("#4e5a68")
+      .stroke({ color: "#151b21", width: 2 });
+    graphics
+      .ellipse(position.x, position.y - 12, radius * 0.68, radius * 0.38)
+      .fill("#87919c")
+      .stroke({ color: "#151b21", width: 2 });
+    graphics
+      .circle(position.x, position.y, this.photoArtifact.interactionRange)
+      .stroke({
+        color: "#f0e58f",
+        alpha: this.isMayaNearPhotoArtifact() ? 1 : 0.38,
+        width: 1
+      });
   }
 
   private drawSpecialEffects(): void {
+    const graphics = new Graphics();
+    this.renderer.layers.effects.addChild(graphics);
+
     for (const trace of this.shotTraces) {
       const alpha = Math.max(0, 1 - trace.age / trace.duration);
 
-      this.ctx.save();
-      this.ctx.globalAlpha = alpha;
-      this.ctx.strokeStyle = "#f5d46b";
-      this.ctx.lineWidth = 3;
-      this.ctx.beginPath();
-      this.ctx.moveTo(trace.from.x, trace.from.y);
-      this.ctx.lineTo(trace.to.x, trace.to.y);
-      this.ctx.stroke();
-      this.ctx.restore();
+      graphics
+        .moveTo(trace.from.x, trace.from.y)
+        .lineTo(trace.to.x, trace.to.y)
+        .stroke({ color: "#f5d46b", alpha, width: 3 });
     }
 
     for (const flash of this.photoFlashes) {
       const progress = flash.age / flash.duration;
       const alpha = Math.max(0, 1 - progress);
 
-      this.ctx.save();
-      this.ctx.globalAlpha = alpha;
-      this.ctx.strokeStyle = "#f6f2ce";
-      this.ctx.lineWidth = 2;
-      this.ctx.beginPath();
-      this.ctx.arc(flash.position.x, flash.position.y - 12, 20 + progress * 44, 0, Math.PI * 2);
-      this.ctx.stroke();
-      this.ctx.restore();
+      graphics
+        .circle(flash.position.x, flash.position.y - 12, 20 + progress * 44)
+        .stroke({ color: "#f6f2ce", alpha, width: 2 });
     }
   }
 
@@ -930,40 +906,31 @@ export class Game {
     const blink = 0.5 + Math.sin(this.elapsedTime * Math.PI * 4.8) * 0.5;
     const bob = Math.sin(this.elapsedTime * Math.PI * 2.2) * 2;
     const alpha = hovered ? 0.35 + blink * 0.65 : 0.48 + blink * 0.18;
+    const graphics = new Graphics();
 
-    this.ctx.save();
-    this.ctx.translate(position.x, position.y + bob);
-    this.ctx.globalAlpha = alpha;
-    this.ctx.lineCap = "round";
-    this.ctx.lineJoin = "round";
-
-    this.ctx.strokeStyle = "rgba(8, 10, 7, 0.86)";
-    this.ctx.lineWidth = 6;
-    this.strokeRopeIcon();
-
-    this.ctx.strokeStyle = "#eadba8";
-    this.ctx.lineWidth = 3;
-    this.strokeRopeIcon();
-
-    this.ctx.fillStyle = "#eadba8";
-    this.ctx.beginPath();
-    this.ctx.arc(0, 11, 3.5, 0, Math.PI * 2);
-    this.ctx.fill();
-    this.ctx.restore();
+    graphics.position.set(position.x, position.y + bob);
+    graphics.alpha = alpha;
+    this.strokeRopeIcon(graphics, "#080a07", 6, 0.86);
+    this.strokeRopeIcon(graphics, "#eadba8", 3);
+    graphics.circle(0, 11, 3.5).fill("#eadba8");
+    this.renderer.layers.prompts.addChild(graphics);
   }
 
-  private strokeRopeIcon(): void {
-    this.ctx.beginPath();
-    this.ctx.ellipse(-8, 0, 8, 11, -0.48, 0, Math.PI * 2);
-    this.ctx.ellipse(8, 0, 8, 11, 0.48, 0, Math.PI * 2);
-    this.ctx.moveTo(-18, -10);
-    this.ctx.bezierCurveTo(-10, -18, 10, -18, 18, -10);
-    this.ctx.moveTo(-5, 11);
-    this.ctx.lineTo(5, 11);
-    this.ctx.stroke();
+  private strokeRopeIcon(graphics: Graphics, color: string, width: number, alpha = 1): void {
+    graphics
+      .ellipse(-8, 0, 8, 11)
+      .ellipse(8, 0, 8, 11)
+      .moveTo(-18, -10)
+      .bezierCurveTo(-10, -18, 10, -18, 18, -10)
+      .moveTo(-5, 11)
+      .lineTo(5, 11)
+      .stroke({ color, alpha, width, cap: "round", join: "round" });
   }
 
   private drawEnemyVision(): void {
+    const graphics = new Graphics();
+    this.renderer.layers.vision.addChild(graphics);
+
     for (const enemy of this.enemies.values()) {
       if (enemy.state === "neutralized" || enemy.state === "bound") {
         continue;
@@ -971,15 +938,15 @@ export class Game {
 
       const cone = this.buildDetectionCone(enemy);
 
-      this.ctx.save();
-      this.ctx.fillStyle = "rgba(26, 104, 45, 0.32)";
-      this.drawPolygon(cone.far);
-      this.ctx.fillStyle = "rgba(132, 238, 104, 0.38)";
-      this.drawPolygon(cone.close);
-      this.ctx.strokeStyle = enemy.state === "shooting" ? "rgba(255, 80, 62, 0.74)" : "rgba(142, 232, 114, 0.7)";
-      this.ctx.lineWidth = 1.6;
-      this.strokePolygon(cone.far);
-      this.ctx.restore();
+      this.fillPolygon(graphics, cone.far, "#1a682d", 0.32);
+      this.fillPolygon(graphics, cone.close, "#84ee68", 0.38);
+      this.strokePolygon(
+        graphics,
+        cone.far,
+        enemy.state === "shooting" ? "#ff503e" : "#8ee872",
+        1.6,
+        enemy.state === "shooting" ? 0.74 : 0.7
+      );
     }
   }
 
@@ -1015,55 +982,44 @@ export class Game {
       return;
     }
 
-    this.ctx.save();
-    this.ctx.strokeStyle = "#f6f2ce";
-    this.ctx.lineWidth = 3;
-    this.ctx.beginPath();
-    this.ctx.moveTo(maya.state.position.x - 8, maya.state.position.y - 132);
-    this.ctx.lineTo(maya.state.position.x + 8, maya.state.position.y - 116);
-    this.ctx.moveTo(maya.state.position.x + 8, maya.state.position.y - 132);
-    this.ctx.lineTo(maya.state.position.x - 8, maya.state.position.y - 116);
-    this.ctx.stroke();
-    this.ctx.restore();
+    this.renderer.layers.prompts.addChild(
+      new Graphics()
+        .moveTo(maya.state.position.x - 8, maya.state.position.y - 132)
+        .lineTo(maya.state.position.x + 8, maya.state.position.y - 116)
+        .moveTo(maya.state.position.x + 8, maya.state.position.y - 132)
+        .lineTo(maya.state.position.x - 8, maya.state.position.y - 116)
+        .stroke({ color: "#f6f2ce", width: 3 })
+    );
   }
 
   private drawMarkers(): void {
+    const graphics = new Graphics();
+    this.renderer.layers.markers.addChild(graphics);
+
     for (const marker of this.markers) {
       const progress = marker.age / marker.duration;
       const alpha = Math.max(0, 1 - progress);
 
-      this.ctx.save();
-      this.ctx.globalAlpha = alpha;
-      this.ctx.translate(marker.position.x, marker.position.y);
-
       if (marker.type === "target") {
         const radius = 7 + progress * 12;
-        this.ctx.strokeStyle = "#f0e58f";
-        this.ctx.lineWidth = 2;
-        this.ctx.beginPath();
-        this.ctx.arc(0, 0, radius, 0, Math.PI * 2);
-        this.ctx.stroke();
-        this.ctx.beginPath();
-        this.ctx.moveTo(-12, 0);
-        this.ctx.lineTo(12, 0);
-        this.ctx.moveTo(0, -12);
-        this.ctx.lineTo(0, 12);
-        this.ctx.stroke();
+        graphics
+          .circle(marker.position.x, marker.position.y, radius)
+          .stroke({ color: "#f0e58f", alpha, width: 2 })
+          .moveTo(marker.position.x - 12, marker.position.y)
+          .lineTo(marker.position.x + 12, marker.position.y)
+          .moveTo(marker.position.x, marker.position.y - 12)
+          .lineTo(marker.position.x, marker.position.y + 12)
+          .stroke({ color: "#f0e58f", alpha, width: 2 });
       } else {
-        this.ctx.strokeStyle = "#f25f4c";
-        this.ctx.lineWidth = 3;
-        this.ctx.beginPath();
-        this.ctx.arc(0, 0, 9 + progress * 4, 0, Math.PI * 2);
-        this.ctx.stroke();
-        this.ctx.beginPath();
-        this.ctx.moveTo(-7, -7);
-        this.ctx.lineTo(7, 7);
-        this.ctx.moveTo(7, -7);
-        this.ctx.lineTo(-7, 7);
-        this.ctx.stroke();
+        graphics
+          .circle(marker.position.x, marker.position.y, 9 + progress * 4)
+          .stroke({ color: "#f25f4c", alpha, width: 3 })
+          .moveTo(marker.position.x - 7, marker.position.y - 7)
+          .lineTo(marker.position.x + 7, marker.position.y + 7)
+          .moveTo(marker.position.x + 7, marker.position.y - 7)
+          .lineTo(marker.position.x - 7, marker.position.y + 7)
+          .stroke({ color: "#f25f4c", alpha, width: 3 });
       }
-
-      this.ctx.restore();
     }
   }
 
@@ -1073,45 +1029,48 @@ export class Game {
     }
 
     for (const character of this.characters.values()) {
-      character.drawDebug(this.ctx);
+      character.drawDebug(this.renderer.layers.debug);
     }
 
     for (const enemy of this.enemies.values()) {
-      enemy.drawDebug(this.ctx);
+      enemy.drawDebug(this.renderer.layers.debug);
     }
 
     const bounds = this.camera.getVisibleBounds();
-    this.ctx.save();
-    this.ctx.strokeStyle = "rgba(255, 255, 255, 0.48)";
-    this.ctx.setLineDash([8, 6]);
-    this.ctx.lineWidth = 2;
-    this.ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+    const graphics = new Graphics()
+      .rect(bounds.x, bounds.y, bounds.width, bounds.height)
+      .stroke({ color: "#ffffff", alpha: 0.48, width: 2 });
 
     if (this.cursorWorld) {
-      this.ctx.setLineDash([]);
-      this.ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
-      this.ctx.beginPath();
-      this.ctx.moveTo(this.cursorWorld.x - 8, this.cursorWorld.y);
-      this.ctx.lineTo(this.cursorWorld.x + 8, this.cursorWorld.y);
-      this.ctx.moveTo(this.cursorWorld.x, this.cursorWorld.y - 8);
-      this.ctx.lineTo(this.cursorWorld.x, this.cursorWorld.y + 8);
-      this.ctx.stroke();
+      graphics
+        .moveTo(this.cursorWorld.x - 8, this.cursorWorld.y)
+        .lineTo(this.cursorWorld.x + 8, this.cursorWorld.y)
+        .moveTo(this.cursorWorld.x, this.cursorWorld.y - 8)
+        .lineTo(this.cursorWorld.x, this.cursorWorld.y + 8)
+        .stroke({ color: "#ffffff", alpha: 0.8, width: 2 });
     }
 
-    this.ctx.restore();
+    this.renderer.layers.debug.addChild(graphics);
   }
 
   private drawDebugPolygon(polygon: CollisionPolygon): void {
-    this.ctx.save();
-    this.ctx.fillStyle = "rgba(255, 64, 64, 0.18)";
-    this.ctx.strokeStyle = "rgba(255, 96, 96, 0.9)";
-    this.ctx.lineWidth = 2;
-    this.drawPolygon(polygon.points);
-    this.strokePolygon(polygon.points);
-    this.ctx.fillStyle = "rgba(255, 215, 180, 0.95)";
-    this.ctx.font = "12px Consolas, monospace";
-    this.ctx.fillText(polygon.label, polygon.points[0].x + 6, polygon.points[0].y - 6);
-    this.ctx.restore();
+    const layer = this.renderer.layers.debug;
+    const graphics = new Graphics();
+    this.fillPolygon(graphics, polygon.points, "#ff4040", 0.18);
+    this.strokePolygon(graphics, polygon.points, "#ff6060", 2, 0.9);
+    layer.addChild(graphics);
+    layer.addChild(
+      new Text({
+        text: polygon.label,
+        x: polygon.points[0].x + 6,
+        y: polygon.points[0].y - 20,
+        style: {
+          fill: "#ffd7b4",
+          fontFamily: "Consolas, monospace",
+          fontSize: 12
+        }
+      })
+    );
   }
 
   private drawScreenDebug(): void {
@@ -1124,15 +1083,20 @@ export class Game {
       `frame: ${selected.state.frameIndex}`
     ];
 
-    this.ctx.save();
-    this.ctx.fillStyle = "rgba(8, 10, 7, 0.76)";
-    this.ctx.fillRect(12, 12, 245, 104);
-    this.ctx.fillStyle = "#e9eddf";
-    this.ctx.font = "12px Consolas, monospace";
-    lines.forEach((line, index) => {
-      this.ctx.fillText(line, 24, 34 + index * 17);
-    });
-    this.ctx.restore();
+    this.renderer.screenLayer.addChild(
+      new Graphics().rect(12, 12, 245, 104).fill({ color: "#080a07", alpha: 0.76 }),
+      new Text({
+        text: lines.join("\n"),
+        x: 24,
+        y: 25,
+        style: {
+          fill: "#e9eddf",
+          fontFamily: "Consolas, monospace",
+          fontSize: 12,
+          lineHeight: 17
+        }
+      })
+    );
   }
 
   private buildDebugReadout(selected: Character): string {
@@ -1160,41 +1124,28 @@ export class Game {
     const progress = this.alarmFlash.age / this.alarmFlash.duration;
     const pulse = 0.45 + Math.sin(progress * Math.PI * 18) * 0.22;
 
-    this.ctx.save();
-    this.ctx.fillStyle = `rgba(255, 31, 31, ${0.58 + pulse * 0.28})`;
-    this.ctx.strokeStyle = "rgba(255, 210, 190, 0.82)";
-    this.ctx.lineWidth = 3;
-    this.ctx.beginPath();
-    this.ctx.arc(this.viewport.width - 42, 42, 20 + pulse * 5, 0, Math.PI * 2);
-    this.ctx.fill();
-    this.ctx.stroke();
-    this.ctx.fillStyle = "rgba(120, 0, 0, 0.34)";
-    this.ctx.fillRect(0, 0, this.viewport.width, 8);
-    this.ctx.restore();
+    this.renderer.screenLayer.addChild(
+      new Graphics()
+        .circle(this.viewport.width - 42, 42, 20 + pulse * 5)
+        .fill({ color: "#ff1f1f", alpha: 0.58 + pulse * 0.28 })
+        .stroke({ color: "#ffd2be", alpha: 0.82, width: 3 })
+        .rect(0, 0, this.viewport.width, 8)
+        .fill({ color: "#780000", alpha: 0.34 })
+    );
   }
 
-  private drawPolygon(points: WorldPoint[]): void {
-    this.ctx.beginPath();
-    this.ctx.moveTo(points[0].x, points[0].y);
-
-    for (let i = 1; i < points.length; i += 1) {
-      this.ctx.lineTo(points[i].x, points[i].y);
-    }
-
-    this.ctx.closePath();
-    this.ctx.fill();
+  private fillPolygon(graphics: Graphics, points: WorldPoint[], color: string, alpha = 1): void {
+    graphics.poly(points, true).fill({ color, alpha });
   }
 
-  private strokePolygon(points: WorldPoint[]): void {
-    this.ctx.beginPath();
-    this.ctx.moveTo(points[0].x, points[0].y);
-
-    for (let i = 1; i < points.length; i += 1) {
-      this.ctx.lineTo(points[i].x, points[i].y);
-    }
-
-    this.ctx.closePath();
-    this.ctx.stroke();
+  private strokePolygon(
+    graphics: Graphics,
+    points: WorldPoint[],
+    color: string,
+    width: number,
+    alpha = 1
+  ): void {
+    graphics.poly(points, true).stroke({ color, alpha, width });
   }
 
   private angleDifference(a: number, b: number): number {
@@ -1202,37 +1153,24 @@ export class Game {
   }
 
   private renderMessage(message: string, color = "#e5e1d6"): void {
-    this.prepareContext();
-    this.ctx.fillStyle = "#10130d";
-    this.ctx.fillRect(0, 0, this.viewport.width, this.viewport.height);
-    this.ctx.fillStyle = color;
-    this.ctx.font = "16px system-ui, sans-serif";
-    this.ctx.fillText(message, 24, 36);
+    this.resizeCanvas();
+    this.renderer.renderMessage(message, color);
   }
 
-  private prepareContext(): void {
+  private prepareScene(): void {
     this.resizeCanvas();
-    this.ctx.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
-    this.ctx.clearRect(0, 0, this.viewport.width, this.viewport.height);
-    this.ctx.imageSmoothingEnabled = true;
+    this.renderer.beginFrame(this.camera.position);
   }
 
   private resizeCanvas = (): void => {
-    const rect = this.canvas.getBoundingClientRect();
+    const rect = this.canvas.parentElement?.getBoundingClientRect() ?? this.canvas.getBoundingClientRect();
     const width = Math.max(1, Math.floor(rect.width));
     const height = Math.max(1, Math.floor(rect.height));
     const pixelRatio = window.devicePixelRatio || 1;
-    const internalWidth = Math.max(1, Math.floor(width * pixelRatio));
-    const internalHeight = Math.max(1, Math.floor(height * pixelRatio));
 
-    if (this.canvas.width !== internalWidth || this.canvas.height !== internalHeight) {
-      this.canvas.width = internalWidth;
-      this.canvas.height = internalHeight;
-    }
-
-    this.pixelRatio = pixelRatio;
     this.viewport = { width, height };
     this.camera.setViewport(width, height);
+    this.renderer.resize(width, height, pixelRatio);
   };
 
   private formatPoint(point: WorldPoint | null): string {
@@ -1249,5 +1187,6 @@ export class Game {
     this.resizeObserver?.disconnect();
     window.removeEventListener("resize", this.resizeCanvas);
     window.removeEventListener("beforeunload", this.dispose);
+    this.renderer.destroy();
   };
 }

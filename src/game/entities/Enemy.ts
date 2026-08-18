@@ -1,3 +1,4 @@
+import { Container, Graphics, Rectangle, Sprite, Text, Texture } from "pixi.js";
 import { GAME_CONFIG } from "../config";
 import { clonePoint, directionFromVector, distance, normalize } from "../geometry";
 import type { Direction, EnemyId, MovingMotion, WorldPoint } from "../types";
@@ -58,6 +59,8 @@ export class Enemy {
   targetPosition: WorldPoint | null = null;
   alertedBy: EnemyId | null = null;
 
+  private readonly baseTexture: Texture;
+  private readonly frameTextures = new Map<string, Texture>();
   private routeIndex = 1;
   private frameIndex = 0;
   private animationElapsed = 0;
@@ -73,6 +76,7 @@ export class Enemy {
     this.name = options.name;
     this.image = options.image;
     this.route = options.route.map(clonePoint);
+    this.baseTexture = Texture.from(options.image);
     this.position = clonePoint(this.route[0]);
     this.targetPosition = clonePoint(this.route[1]);
   }
@@ -217,85 +221,59 @@ export class Enemy {
     };
   }
 
-  draw(ctx: CanvasRenderingContext2D): void {
+  draw(container: Container): void {
     const source = this.getSourceRect();
-    const size = this.getRenderSize();
-    const drawY = this.position.y - size.height;
 
-    ctx.save();
-    ctx.fillStyle = "rgba(0, 0, 0, 0.28)";
-    ctx.beginPath();
-    ctx.ellipse(this.position.x, this.position.y - 4, 24, 9, 0, 0, Math.PI * 2);
-    ctx.fill();
+    const graphics = new Graphics()
+      .ellipse(this.position.x, this.position.y - 4, 24, 9)
+      .fill({ color: "#000000", alpha: 0.28 });
 
     if (this.state === "shooting") {
-      ctx.strokeStyle = "rgba(255, 88, 65, 0.9)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(this.position.x, this.position.y - 52, 23, 0, Math.PI * 2);
-      ctx.stroke();
+      graphics
+        .circle(this.position.x, this.position.y - 52, 23)
+        .stroke({ color: "#ff5841", alpha: 0.9, width: 2 });
     }
 
-    if (this.state === "neutralized") {
-      ctx.globalAlpha = 0.52;
-    }
+    container.addChild(graphics);
 
-    if (source.flipX) {
-      ctx.translate(this.position.x, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(
-        this.image,
-        source.x,
-        source.y,
-        source.width,
-        source.height,
-        -size.width / 2,
-        drawY,
-        size.width,
-        size.height
-      );
-      ctx.restore();
-      return;
-    }
-
-    ctx.drawImage(
-      this.image,
-      source.x,
-      source.y,
-      source.width,
-      source.height,
-      this.position.x - size.width / 2,
-      drawY,
-      size.width,
-      size.height
+    const sprite = new Sprite(this.getFrameTexture(source));
+    sprite.anchor.set(0.5, 1);
+    sprite.alpha = this.state === "neutralized" ? 0.52 : 1;
+    sprite.position.set(this.position.x, this.position.y);
+    sprite.scale.set(
+      source.flipX ? -GAME_CONFIG.enemy.renderScale : GAME_CONFIG.enemy.renderScale,
+      GAME_CONFIG.enemy.renderScale
     );
+    container.addChild(sprite);
 
     if (this.state === "neutralized") {
-      ctx.globalAlpha = 1;
-      ctx.strokeStyle = "rgba(20, 20, 16, 0.9)";
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(this.position.x - 18, this.position.y - 50);
-      ctx.lineTo(this.position.x + 18, this.position.y - 24);
-      ctx.moveTo(this.position.x + 18, this.position.y - 50);
-      ctx.lineTo(this.position.x - 18, this.position.y - 24);
-      ctx.stroke();
+      container.addChild(
+        new Graphics()
+          .moveTo(this.position.x - 18, this.position.y - 50)
+          .lineTo(this.position.x + 18, this.position.y - 24)
+          .moveTo(this.position.x + 18, this.position.y - 50)
+          .lineTo(this.position.x - 18, this.position.y - 24)
+          .stroke({ color: "#141410", alpha: 0.9, width: 4 })
+      );
     }
-    ctx.restore();
   }
 
-  drawDebug(ctx: CanvasRenderingContext2D): void {
-    ctx.save();
-    ctx.strokeStyle = "rgba(255, 120, 84, 0.9)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(this.position.x, this.position.y, GAME_CONFIG.enemyCollisionRadius, 0, Math.PI * 2);
-    ctx.stroke();
-
-    ctx.fillStyle = "#ffb084";
-    ctx.font = "12px Consolas, monospace";
-    ctx.fillText(`${this.id} ${this.state}`, this.position.x + 12, this.position.y - 78);
-    ctx.restore();
+  drawDebug(container: Container): void {
+    container.addChild(
+      new Graphics()
+        .circle(this.position.x, this.position.y, GAME_CONFIG.enemyCollisionRadius)
+        .stroke({ color: "#ff7854", alpha: 0.9, width: 1.5 }),
+      new Text({
+        text: `${this.id} ${this.state}`,
+        x: this.position.x + 12,
+        y: this.position.y - 92,
+        style: {
+          fill: "#ffb084",
+          fontFamily: "Consolas, monospace",
+          fontSize: 12
+        }
+      })
+    );
   }
 
   private getSourceRect(): { x: number; y: number; width: number; height: number; flipX: boolean } {
@@ -322,6 +300,28 @@ export class Enemy {
       width: ENEMY_SHEET.frameWidth * GAME_CONFIG.enemy.renderScale,
       height: ENEMY_SHEET.frameHeight * GAME_CONFIG.enemy.renderScale
     };
+  }
+
+  private getFrameTexture(source: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }): Texture {
+    const key = `${source.x}:${source.y}:${source.width}:${source.height}`;
+    const cached = this.frameTextures.get(key);
+
+    if (cached) {
+      return cached;
+    }
+
+    const texture = new Texture({
+      source: this.baseTexture.source,
+      frame: new Rectangle(source.x, source.y, source.width, source.height)
+    });
+    this.frameTextures.set(key, texture);
+
+    return texture;
   }
 
   private setNextPatrolTarget(): void {
