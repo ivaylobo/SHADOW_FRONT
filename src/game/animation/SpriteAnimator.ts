@@ -6,6 +6,7 @@ import type {
   MovingMotion,
   MovementSpriteManifest,
   SpecialAction,
+  SpriteRowReference,
   Stance
 } from "../types";
 
@@ -89,6 +90,35 @@ export class SpriteAnimator {
     };
   }
 
+  getDeathSourceRect(
+    characterId: CharacterId,
+    direction: Direction,
+    frameIndex: number
+  ): SourceRect | null {
+    const fileInfo = this.manifest.files[characterId];
+    const rowCount = fileInfo.rows ?? this.manifest.rows;
+    const death = this.normalizeRowReference(
+      fileInfo.death ?? this.manifest.deathRows?.[characterId]
+    ) ?? { row: rowCount - 1 };
+
+    if (death.row < 0 || death.row >= rowCount) {
+      return null;
+    }
+
+    const resolvedFrameIndex = Math.min(
+      Math.max(0, death.frame ?? frameIndex),
+      this.manifest.framesPerAnimation - 1
+    );
+
+    return {
+      x: resolvedFrameIndex * this.manifest.frameWidth,
+      y: death.row * this.manifest.frameHeight,
+      width: this.manifest.frameWidth,
+      height: this.manifest.frameHeight,
+      flipX: death.flipX ?? this.shouldFlipSpecialAction(direction)
+    };
+  }
+
   getRenderSize(): { width: number; height: number } {
     return {
       width: this.manifest.frameWidth * GAME_CONFIG.renderScale,
@@ -106,6 +136,16 @@ export class SpriteAnimator {
 
   private shouldFlipSpecialAction(direction: Direction): boolean {
     return direction === "left" || direction === "up-left" || direction === "down-left";
+  }
+
+  private normalizeRowReference(
+    reference: SpriteRowReference | undefined
+  ): { row: number; frame?: number; flipX?: boolean } | null {
+    if (reference === undefined) {
+      return null;
+    }
+
+    return typeof reference === "number" ? { row: reference } : reference;
   }
 
   private resolveSpecialRow(

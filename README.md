@@ -1,51 +1,55 @@
-# Shadow Front - 2D real-time tactics prototype
+# Shadow Front - 2D Real-Time Tactics Prototype
 
-Лек браузърен прототип с Vanilla TypeScript, Vite, HTML5 Canvas 2D за света и обикновен HTML/CSS за десния UI панел.
+Lightweight browser prototype built with Vanilla TypeScript, Vite, PixiJS, and a standard HTML/CSS side panel.
 
-## Стартиране
+## Running
 
 ```bash
 npm install
 npm run dev
 ```
 
-Production проверка:
+Production check:
 
 ```bash
 npm run build
 ```
 
-## Управление
+## Controls
 
-Списъкът по-долу съответства на `CONTROL_HELP` в `src/game/config.ts`, който се използва от UI панела.
+The list below mirrors `CONTROL_HELP` in `src/game/config.ts`, which is rendered in the UI panel.
 
-| Команда | Действие |
+| Command | Action |
 | --- | --- |
-| Ляв клик върху герой | избира героя |
-| Ляв клик върху терена | героят ходи до точката |
-| X | Мая снима artifact отблизо; Альоша стреля към курсора до ограничен range |
-| Shift + ляв клик | героят тича до точката |
-| Двоен ляв клик | героят тича до точката |
-| C | лягане или изправяне |
-| 1 | избор на Мая |
-| 2 | избор на Альоша |
-| Escape | прекратяване на текущото движение |
-| D | показване или скриване на debug информация |
+| Hover + click enemy | Follow the enemy and tie them if close enough |
+| Left-click hero | Select the hero |
+| Left-click terrain | Move the selected hero to that point |
+| X | Maya photographs the artifact up close; Alyosha fires toward the cursor within range |
+| Shift + left-click | Run to the point |
+| Double left-click | Run to the point |
+| C | Toggle prone/upright stance |
+| 1 | Select Maya |
+| 2 | Select Alyosha |
+| Escape | Stop the current movement |
+| D | Toggle debug information |
 
-Не се използва WASD или директно движение със стрелки.
+WASD and arrow-key direct movement are intentionally not used.
 
-## Структура на проекта
+## Project Layout
 
 ```text
 public/assets/characters/
-  alyosha_movement_8dir_6frames_v6_shoot_fixed.png
-  maya_movement_8dir_6frames_v9_aligned_photo.png
+  alyosha_movement_8dir_6frames_v8_tie.png
+  enemy_movement_8dir_6frames_v6_bound.png
+  maya_movement_8dir_6frames_v11_tie.png
   movement-sprites-manifest-6frames.json
 src/game/
   animation/SpriteAnimator.ts
   entities/Character.ts
+  entities/Enemy.ts
   levels/LevelDefinition.ts
   levels/testLevel.ts
+  rendering/PixiGameRenderer.ts
   ui/ControlsPanel.ts
   AssetLoader.ts
   Camera.ts
@@ -59,61 +63,60 @@ src/main.ts
 src/styles.css
 ```
 
-## Спрайтове
+## Sprites
 
-`movement-sprites-manifest-6frames.json` е основният източник за размери, подредба и файлове. PNG файловете са в `public/assets/characters/`, зареждат се веднъж от `AssetLoader`, а `SpriteAnimator` използва manifest данните за:
+`movement-sprites-manifest-6frames.json` is the source of truth for hero sprite dimensions, row layout, and file names. Character PNG files live in `public/assets/characters/`, load once through `AssetLoader`, and are sliced by `SpriteAnimator`.
 
-- размер на кадъра;
-- брой кадри;
-- ред по `motion` и `direction`;
-- source rectangle за `drawImage()`.
+Current sprite layout:
 
-Текущият layout е `6 x 25`: 6 кадъра на ред, 25 реда, кадър `192 x 256`.
-Последният ред (`row 24`) е специалното действие и е описан в manifest-а чрез `specialActions`.
+- heroes: `6 x 28`; rows `24/25` are the primary special action, row `26` is tie, row `27` is death
+- enemies: `6 x 27`; row `24` is shooting, row `25` is bound, row `26` is death
 
-Idle състоянието не е отделна анимация: при `upright` се рисува първият кадър от `walk`, а при `prone` - първият кадър от `crawl`.
+Idle is not a separate animation. Upright idle renders the first `walk` frame; prone idle renders the first `crawl` frame.
 
-## Screen-to-world
+Death animation uses the last sprite-sheet row by default and plays once until the final frame. For heroes, override it with `files.<characterId>.death` in the manifest, for example `{ "row": 27 }`. For enemies, use `GAME_CONFIG.enemy.sprite.deadRow` and optionally `deadFrame`. The temporary `X` marker is used only if the configured death row is invalid.
 
-`InputManager` взима `clientX/clientY`, изважда `getBoundingClientRect()` на Canvas, отчита CSS размера, вътрешната Canvas резолюция и `devicePixelRatio`, след което подава резултата към `camera.screenToWorld()`.
+## Screen To World
 
-Canvas използва CSS pixel координати за game логиката, а вътрешната му резолюция се мащабира според `devicePixelRatio`.
+`InputManager` reads `clientX/clientY`, subtracts the canvas `getBoundingClientRect()`, accounts for CSS size, internal canvas resolution, and `devicePixelRatio`, then passes CSS-pixel screen coordinates to `camera.screenToWorld()`.
 
-## Level definition
+Gameplay uses CSS-pixel coordinates. PixiJS scales the backing resolution by `devicePixelRatio`.
 
-Тестовото ниво е в `src/game/levels/testLevel.ts` и има логически размер `1800 x 1000`. Collision зоните са отделни данни в `collisionPolygons`, а визуалните блокове са в `decorativeObjects`. Това подготвя бъдеща PNG карта, при която изображението ще бъде само визуален слой.
+## Level Definition
 
-`LevelDefinition` вече има места за бъдещи:
+The test level lives in `src/game/levels/testLevel.ts` and uses a logical size of `1800 x 1000`. Collision zones are separate data in `collisionPolygons`; visual blocks are in `decorativeObjects`. This keeps future PNG maps as visual layers rather than collision sources.
 
-- `walkableZones`;
-- `coverZones`;
-- `interactionZones`;
-- `enemySpawnPoints`;
-- `mapImagePath`.
+`LevelDefinition` already has placeholders for:
 
-Collision не се извлича от пиксели.
+- `walkableZones`
+- `coverZones`
+- `interactionZones`
+- `enemySpawnPoints`
+- `mapImagePath`
 
-## Реализирано
+Collision is not inferred from pixels.
 
-- Мая и Альоша се зареждат и присъстват едновременно.
-- Ляв клик върху герой го избира.
-- Ляв клик върху терен задава target в world coordinates.
-- `Shift + click` и двоен клик задават run.
-- `C` превключва `upright/prone`; при `prone` командите използват crawl.
-- `Escape` спира текущото движение.
-- `X` задейства специалното действие: при Мая снима artifact-а само отблизо; при Альоша стреля към курсора до ограничен range.
-- Когато Мая е близо до artifact-а, над нея се показва временно `X` placeholder за бъдещия camera SVG.
-- Движението е плавно с delta time и осем посоки чрез `Math.atan2()`.
-- Collision се проверява чрез ground point и малък radius.
-- Невалиден клик показва кратък червен маркер и не стартира движение.
-- Камерата следва избрания герой и остава в границите на нивото.
-- Render-ът използва Y-sorting за обекти и герои.
-- Debug режимът показва collision polygons, ground points, target линии, cursor world coordinates, frame index и visible bounds.
+## Implemented
 
-## Следващи фази
+- Maya and Alyosha load and exist at the same time.
+- Left-clicking a hero selects them.
+- Left-clicking terrain assigns a world-coordinate target.
+- `Shift + click` and double-click assign run movement.
+- `C` toggles `upright/prone`; prone movement uses crawl.
+- `Escape` stops the current movement.
+- `X` triggers the selected hero special action: Maya photographs the artifact only up close, Alyosha shoots toward the cursor within range.
+- Maya gets a temporary `X` prompt when she is near the artifact.
+- Heroes and enemies have 100 health; kalashnikov shots deal 50 damage.
+- Enemies can rescue bound allies, raise the alarm, investigate gunshots, search a wider route, and return to patrol.
+- Movement uses delta time and eight directions via `Math.atan2()`.
+- Collision uses ground points and body/radius checks.
+- Invalid clicks show a short red marker and do not start movement.
+- The camera follows the selected hero and stays inside the level bounds.
+- Rendering uses Y-sorting for objects, enemies, the artifact, and heroes.
+- Debug mode shows collision polygons, ground points, target lines, cursor world coordinates, frame index, and visible bounds.
 
-- Pathfinding около collision polygons, без да се променя публичната идея за target/path в `Character`.
-- PNG карта като визуален слой, отделен от collision и gameplay зоните.
-- Врагове, patrol поведение и enemy vision.
-- Vision конус с близка зона за `upright` и `prone`, далечна зона само за `upright`, и line-of-sight прекъсване от стени.
-- Cover и interaction zones.
+## Next Phases
+
+- Pathfinding around collision polygons without changing the public target/path model in `Character`.
+- PNG map rendering as a visual layer separated from collision and gameplay zones.
+- Cover and interaction zones.

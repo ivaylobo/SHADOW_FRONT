@@ -43,6 +43,8 @@ export class Character {
     this.state = {
       position: clonePoint(options.initialPosition),
       targetPosition: null,
+      health: GAME_CONFIG.combat.maxHealth,
+      dead: false,
       selected: false,
       stance: "upright",
       motion: "idle",
@@ -61,6 +63,10 @@ export class Character {
     requestedMotion: Exclude<MovingMotion, "crawl">,
     speedOverride: number | null = null
   ): void {
+    if (this.state.dead) {
+      return;
+    }
+
     this.state.action = null;
     this.actionElapsed = 0;
     this.movementIntent = requestedMotion;
@@ -88,6 +94,10 @@ export class Character {
   }
 
   startSpecialAction(action: SpecialAction, targetPosition: WorldPoint): void {
+    if (this.state.dead) {
+      return;
+    }
+
     const toTarget = {
       x: targetPosition.x - this.state.position.x,
       y: targetPosition.y - this.state.position.y
@@ -103,10 +113,17 @@ export class Character {
   }
 
   hasActiveWork(): boolean {
-    return Boolean(this.state.targetPosition || this.state.action);
+    return (
+      (this.state.dead && this.state.frameIndex < this.animator.getFrameCount() - 1) ||
+      (!this.state.dead && Boolean(this.state.targetPosition || this.state.action))
+    );
   }
 
   toggleStance(): void {
+    if (this.state.dead) {
+      return;
+    }
+
     this.state.stance = this.state.stance === "upright" ? "prone" : "upright";
 
     if (this.state.targetPosition) {
@@ -119,6 +136,11 @@ export class Character {
   }
 
   update(deltaTime: number, isWalkable: WalkableCheck): void {
+    if (this.state.dead) {
+      this.updateDeathAnimation(deltaTime);
+      return;
+    }
+
     if (this.state.action) {
       this.updateSpecialAction(deltaTime);
       return;
@@ -170,6 +192,10 @@ export class Character {
   }
 
   containsWorldPoint(point: WorldPoint): boolean {
+    if (this.state.dead) {
+      return false;
+    }
+
     const size = this.animator.getRenderSize();
     const left = this.state.position.x - size.width * 0.46;
     const right = this.state.position.x + size.width * 0.46;
@@ -197,6 +223,11 @@ export class Character {
   }
 
   draw(container: Container): void {
+    if (this.state.dead) {
+      this.drawDead(container);
+      return;
+    }
+
     const source = this.state.action
       ? this.animator.getSpecialSourceRect(
           this.id,
@@ -218,6 +249,32 @@ export class Character {
           .fill({ color: "#dedaa0", alpha: 0.17 })
           .stroke({ color: "#ece28b", alpha: 0.78, width: 2 })
       );
+    }
+
+    const sprite = new Sprite(this.getFrameTexture(source));
+    sprite.anchor.set(0.5, 1);
+    sprite.position.set(this.state.position.x, this.state.position.y);
+    sprite.scale.set(
+      source.flipX ? -GAME_CONFIG.renderScale : GAME_CONFIG.renderScale,
+      GAME_CONFIG.renderScale
+    );
+    container.addChild(sprite);
+
+    if (this.state.selected || this.state.health < GAME_CONFIG.combat.maxHealth) {
+      this.drawHealthBar(container);
+    }
+  }
+
+  private drawDead(container: Container): void {
+    const source = this.animator.getDeathSourceRect(
+      this.id,
+      this.state.direction,
+      this.state.frameIndex
+    );
+
+    if (!source) {
+      this.drawDeathMarker(container);
+      return;
     }
 
     const sprite = new Sprite(this.getFrameTexture(source));
@@ -273,6 +330,75 @@ export class Character {
 
   private getMotionForCurrentStance(): MovingMotion {
     return this.state.stance === "prone" ? "crawl" : this.movementIntent;
+  }
+
+  takeDamage(amount: number): boolean {
+    if (this.state.dead) {
+      return false;
+    }
+
+    this.state.health = Math.max(0, this.state.health - amount);
+
+    if (this.state.health > 0) {
+      return false;
+    }
+
+    this.die();
+    return true;
+  }
+
+  isDead(): boolean {
+    return this.state.dead;
+  }
+
+  private die(): void {
+    this.stop();
+    this.state.health = 0;
+    this.state.dead = true;
+    this.state.frameIndex = 0;
+    this.animationElapsed = 0;
+  }
+
+  private drawDeathMarker(container: Container): void {
+    container.addChild(
+      new Graphics()
+        .moveTo(this.state.position.x - 20, this.state.position.y - 64)
+        .lineTo(this.state.position.x + 20, this.state.position.y - 24)
+        .moveTo(this.state.position.x + 20, this.state.position.y - 64)
+        .lineTo(this.state.position.x - 20, this.state.position.y - 24)
+        .stroke({ color: "#f25f4c", alpha: 0.96, width: 6, cap: "round" })
+    );
+  }
+
+  private drawHealthBar(container: Container): void {
+    const width = 48;
+    const height = 6;
+    const x = this.state.position.x - width / 2;
+    const y = this.state.position.y - this.animator.getRenderSize().height - 12;
+    const fillWidth = width * (this.state.health / GAME_CONFIG.combat.maxHealth);
+
+    container.addChild(
+      new Graphics()
+        .rect(x, y, width, height)
+        .fill({ color: "#151812", alpha: 0.86 })
+        .rect(x, y, fillWidth, height)
+        .fill(this.state.health > 50 ? "#7dd35f" : "#f0c15d")
+        .rect(x, y, width, height)
+        .stroke({ color: "#10140d", alpha: 0.9, width: 1 })
+    );
+  }
+
+  private updateDeathAnimation(deltaTime: number): void {
+    const frameDuration = 1 / GAME_CONFIG.combat.deathFps;
+    this.animationElapsed += deltaTime;
+
+    while (
+      this.animationElapsed >= frameDuration &&
+      this.state.frameIndex < this.animator.getFrameCount() - 1
+    ) {
+      this.state.frameIndex += 1;
+      this.animationElapsed -= frameDuration;
+    }
   }
 
   private updateSpecialAction(deltaTime: number): void {

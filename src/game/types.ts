@@ -25,9 +25,19 @@ export type Motion = "idle" | MovingMotion;
 
 export type SpecialAction = "shoot" | "photo" | "tie";
 
+export type SpriteRowReference =
+  | number
+  | {
+      row: number;
+      frame?: number;
+      flipX?: boolean;
+    };
+
 export interface CharacterState {
   position: WorldPoint;
   targetPosition: WorldPoint | null;
+  health: number;
+  dead: boolean;
   selected: boolean;
   stance: Stance;
   motion: Motion;
@@ -47,6 +57,7 @@ export interface MovementSpriteManifest {
   framesPerAnimation: number;
   movementRows?: number;
   specialRow?: number;
+  deathRows?: Partial<Record<CharacterId, SpriteRowReference>>;
   motions: MovingMotion[];
   directions: Direction[];
   rowFormula: string;
@@ -61,6 +72,7 @@ export interface MovementSpriteManifest {
       rows?: number;
       sheetHeight?: number;
       specialRows?: Partial<Record<SpecialAction, number | { upright: number; prone: number }>>;
+      death?: SpriteRowReference;
     }
   >;
 }

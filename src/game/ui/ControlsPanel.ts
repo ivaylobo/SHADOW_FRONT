@@ -10,6 +10,7 @@ export class ControlsPanel {
   private selectedName: HTMLElement;
   private selectedStance: HTMLElement;
   private selectedMotion: HTMLElement;
+  private selectedHealth: HTMLElement;
   private selectedTarget: HTMLElement;
   private controlsList: HTMLElement;
   private debugPanel: HTMLElement;
@@ -19,6 +20,7 @@ export class ControlsPanel {
     this.selectedName = this.requireElement("#selected-name");
     this.selectedStance = this.requireElement("#selected-stance");
     this.selectedMotion = this.requireElement("#selected-motion");
+    this.selectedHealth = this.requireElement("#selected-health");
     this.selectedTarget = this.requireElement("#selected-target");
     this.controlsList = this.requireElement("#controls-list");
     this.debugPanel = this.requireElement("#debug-panel");
@@ -33,7 +35,8 @@ export class ControlsPanel {
     this.selectedName.textContent = status.name;
     this.selectedStance.textContent = status.state.stance;
     this.selectedMotion.textContent = status.state.action ?? status.state.motion;
-    this.selectedTarget.textContent = status.state.targetPosition ? "активна" : "няма";
+    this.selectedHealth.textContent = `${status.state.health}`;
+    this.selectedTarget.textContent = status.state.targetPosition ? "active" : "none";
   }
 
   setDebug(enabled: boolean, readout: string): void {

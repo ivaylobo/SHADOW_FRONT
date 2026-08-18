@@ -21,6 +21,8 @@ export class PixiGameRenderer {
     LAYER_KEYS.map((key) => [key, new Container()])
   ) as Record<LayerKey, Container>;
 
+  private readonly worldLayers = LAYER_KEYS.map((key) => this.layers[key]);
+  private readonly clearableLayers = [...this.worldLayers, this.screenLayer];
   private initialized = false;
 
   constructor(private canvas: HTMLCanvasElement) {}
@@ -45,7 +47,7 @@ export class PixiGameRenderer {
       autoStart: false
     });
 
-    this.worldLayer.addChild(...LAYER_KEYS.map((key) => this.layers[key]));
+    this.worldLayer.addChild(...this.worldLayers);
     this.app.stage.addChild(this.worldLayer, this.screenLayer);
     this.initialized = true;
   }
@@ -98,7 +100,7 @@ export class PixiGameRenderer {
   }
 
   private clearLayers(): void {
-    for (const layer of [...Object.values(this.layers), this.screenLayer]) {
+    for (const layer of this.clearableLayers) {
       for (const child of layer.removeChildren()) {
         child.destroy({ children: true });
       }

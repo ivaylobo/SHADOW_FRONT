@@ -36,5 +36,6 @@ export interface LevelDefinition {
     id: EnemyId;
     name: string;
     route: WorldPoint[];
+    alarmRoute?: WorldPoint[];
   }>;
 }

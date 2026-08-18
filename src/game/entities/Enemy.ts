@@ -1,15 +1,23 @@
 import { Container, Graphics, Rectangle, Sprite, Text, Texture } from "pixi.js";
 import { GAME_CONFIG } from "../config";
-import { clonePoint, directionFromVector, distance, normalize } from "../geometry";
+import { clonePoint, directionFromVector, distance, distanceSquared, normalize } from "../geometry";
 import type { Direction, EnemyId, MovingMotion, WorldPoint } from "../types";
 
-type EnemyState = "patrol" | "responding" | "shooting" | "neutralized" | "bound";
+type EnemyState =
+  | "patrol"
+  | "responding"
+  | "rescuing"
+  | "searching"
+  | "shooting"
+  | "dead"
+  | "bound";
 
 export interface EnemyOptions {
   id: EnemyId;
   name: string;
   image: HTMLImageElement;
   route: WorldPoint[];
+  alarmRoute?: WorldPoint[];
 }
 
 export interface EnemyVision {
@@ -27,7 +35,9 @@ const ENEMY_SHEET = {
   frameWidth: GAME_CONFIG.enemy.sprite.sheetWidth / GAME_CONFIG.enemy.sprite.columns,
   frameHeight: GAME_CONFIG.enemy.sprite.sheetHeight / GAME_CONFIG.enemy.sprite.rows,
   shootRow: GAME_CONFIG.enemy.sprite.shootRow,
-  boundRow: GAME_CONFIG.enemy.sprite.boundRow
+  boundRow: GAME_CONFIG.enemy.sprite.boundRow,
+  deadRow: GAME_CONFIG.enemy.sprite.deadRow,
+  deadFrame: GAME_CONFIG.enemy.sprite.deadFrame
 };
 
 const ROW_OFFSETS: Record<Direction, { row: number; flipX: boolean }> = {
@@ -52,16 +62,21 @@ export class Enemy {
   readonly name: string;
   readonly image: HTMLImageElement;
   readonly route: WorldPoint[];
+  readonly alarmRoute: WorldPoint[];
 
   position: WorldPoint;
   direction: Direction = "down";
   state: EnemyState = "patrol";
+  health: number = GAME_CONFIG.combat.maxHealth;
   targetPosition: WorldPoint | null = null;
   alertedBy: EnemyId | null = null;
+  rescueTargetId: EnemyId | null = null;
 
   private readonly baseTexture: Texture;
   private readonly frameTextures = new Map<string, Texture>();
   private routeIndex = 1;
+  private alarmRouteIndex = 0;
+  private alarmRouteVisits = 0;
   private frameIndex = 0;
   private animationElapsed = 0;
   private stateElapsed = 0;
@@ -76,6 +91,7 @@ export class Enemy {
     this.name = options.name;
     this.image = options.image;
     this.route = options.route.map(clonePoint);
+    this.alarmRoute = (options.alarmRoute?.length ? options.alarmRoute : options.route).map(clonePoint);
     this.baseTexture = Texture.from(options.image);
     this.position = clonePoint(this.route[0]);
     this.targetPosition = clonePoint(this.route[1]);
@@ -84,7 +100,12 @@ export class Enemy {
   update(deltaTime: number, isWalkable: (position: WorldPoint, radius: number) => boolean): void {
     this.stateElapsed += deltaTime;
 
-    if (this.state === "neutralized" || this.state === "bound") {
+    if (this.state === "dead") {
+      this.advanceDeathAnimation(deltaTime);
+      return;
+    }
+
+    if (this.state === "bound") {
       return;
     }
 
@@ -94,7 +115,13 @@ export class Enemy {
     }
 
     if (!this.targetPosition) {
-      this.setNextPatrolTarget();
+      if (this.state === "searching") {
+        this.setNextAlarmRouteTarget();
+      } else if (this.state === "rescuing") {
+        return;
+      } else {
+        this.setNextPatrolTarget();
+      }
     }
 
     if (!this.targetPosition) {
@@ -110,7 +137,11 @@ export class Enemy {
     if (remainingDistance <= GAME_CONFIG.arrivalThreshold) {
       this.position = clonePoint(this.targetPosition);
       if (this.state === "responding") {
-        this.startShooting();
+        this.startAlarmSearch();
+      } else if (this.state === "rescuing") {
+        this.targetPosition = null;
+      } else if (this.state === "searching") {
+        this.advanceAlarmRoute();
       } else {
         this.setNextPatrolTarget();
       }
@@ -119,7 +150,9 @@ export class Enemy {
 
     this.direction = directionFromVector(toTarget, this.direction);
     this.facingAngle = Math.atan2(toTarget.y, toTarget.x);
-    const speed = this.state === "responding" ? GAME_CONFIG.enemy.runSpeed : GAME_CONFIG.enemy.walkSpeed;
+    const isAlertMovement =
+      this.state === "responding" || this.state === "rescuing" || this.state === "searching";
+    const speed = isAlertMovement ? GAME_CONFIG.enemy.runSpeed : GAME_CONFIG.enemy.walkSpeed;
     const stepDistance = Math.min(speed * deltaTime, remainingDistance);
     const movement = normalize(toTarget);
     const nextPosition = {
@@ -128,19 +161,31 @@ export class Enemy {
     };
 
     if (!isWalkable(nextPosition, GAME_CONFIG.enemyCollisionRadius)) {
-      this.setNextPatrolTarget();
+      if (this.state === "searching") {
+        this.advanceAlarmRoute();
+      } else if (this.state === "rescuing") {
+        this.targetPosition = null;
+      } else {
+        this.setNextPatrolTarget();
+      }
       return;
     }
 
     this.position = nextPosition;
-    this.advanceAnimation(this.state === "responding" ? "run" : "walk", this.state === "responding" ? GAME_CONFIG.enemy.runFps : GAME_CONFIG.enemy.walkFps, deltaTime);
+    this.advanceAnimation(
+      isAlertMovement ? "run" : "walk",
+      isAlertMovement ? GAME_CONFIG.enemy.runFps : GAME_CONFIG.enemy.walkFps,
+      deltaTime
+    );
   }
 
   startShooting(target?: WorldPoint): void {
+    if (this.state === "dead" || this.state === "bound") {
+      return;
+    }
+
     if (target) {
-      const toTarget = { x: target.x - this.position.x, y: target.y - this.position.y };
-      this.direction = directionFromVector(toTarget, this.direction);
-      this.facingAngle = Math.atan2(toTarget.y, toTarget.x);
+      this.faceTarget(target);
     }
 
     this.state = "shooting";
@@ -148,38 +193,121 @@ export class Enemy {
     this.frameIndex = 0;
     this.animationElapsed = 0;
     this.stateElapsed = 0;
+    this.rescueTargetId = null;
+  }
+
+  faceTarget(target: WorldPoint): void {
+    const toTarget = { x: target.x - this.position.x, y: target.y - this.position.y };
+    this.direction = directionFromVector(toTarget, this.direction);
+    this.facingAngle = Math.atan2(toTarget.y, toTarget.x);
+  }
+
+  stopShooting(): void {
+    if (this.state !== "shooting") {
+      return;
+    }
+
+    this.resumePatrol();
   }
 
   respondTo(enemy: Enemy): void {
+    this.respondToPosition(enemy.position, enemy.id);
+  }
+
+  respondToPosition(position: WorldPoint, alertedBy: EnemyId | null = null): void {
     if (
       this.state === "shooting" ||
-      this.state === "neutralized" ||
+      this.state === "dead" ||
       this.state === "bound" ||
-      this.id === enemy.id
+      this.id === alertedBy
     ) {
       return;
     }
 
     this.state = "responding";
-    this.alertedBy = enemy.id;
-    this.targetPosition = clonePoint(enemy.position);
-    this.frameIndex = 0;
-    this.animationElapsed = 0;
-  }
-
-  neutralize(): void {
-    this.state = "neutralized";
-    this.targetPosition = null;
-    this.alertedBy = null;
+    this.alertedBy = alertedBy;
+    this.rescueTargetId = null;
+    this.targetPosition = clonePoint(position);
     this.frameIndex = 0;
     this.animationElapsed = 0;
     this.stateElapsed = 0;
   }
 
+  startRescue(boundEnemy: Enemy): void {
+    if (
+      this.state === "shooting" ||
+      this.state === "dead" ||
+      this.state === "bound" ||
+      this.id === boundEnemy.id
+    ) {
+      return;
+    }
+
+    this.state = "rescuing";
+    this.alertedBy = boundEnemy.id;
+    this.rescueTargetId = boundEnemy.id;
+    this.targetPosition = clonePoint(boundEnemy.position);
+    this.frameIndex = 0;
+    this.animationElapsed = 0;
+    this.stateElapsed = 0;
+  }
+
+  retargetRescue(boundEnemy: Enemy): void {
+    if (this.state === "rescuing" && this.rescueTargetId === boundEnemy.id) {
+      this.targetPosition = clonePoint(boundEnemy.position);
+    }
+  }
+
+  completeRescue(): void {
+    if (this.state !== "rescuing") {
+      return;
+    }
+
+    this.resumePatrol();
+  }
+
+  unbind(): void {
+    if (this.state !== "bound") {
+      return;
+    }
+
+    this.resumePatrol();
+  }
+
+  startAlarmSearch(): void {
+    if (this.state === "shooting" || this.state === "dead" || this.state === "bound") {
+      return;
+    }
+
+    this.state = "searching";
+    this.alertedBy = null;
+    this.rescueTargetId = null;
+    this.alarmRouteIndex = this.findClosestRouteIndex(this.alarmRoute);
+    this.alarmRouteVisits = 0;
+    this.targetPosition = clonePoint(this.alarmRoute[this.alarmRouteIndex]);
+    this.frameIndex = 0;
+    this.animationElapsed = 0;
+    this.stateElapsed = 0;
+  }
+
+  hasAlarmWork(): boolean {
+    return (
+      this.state === "responding" ||
+      this.state === "rescuing" ||
+      this.state === "searching" ||
+      this.state === "shooting"
+    );
+  }
+
   bind(): void {
+    if (this.state === "dead") {
+      return;
+    }
+
     this.state = "bound";
     this.targetPosition = null;
     this.alertedBy = null;
+    this.rescueTargetId = null;
     this.frameIndex = 0;
     this.animationElapsed = 0;
     this.stateElapsed = 0;
@@ -204,6 +332,10 @@ export class Enemy {
   }
 
   containsWorldPoint(point: WorldPoint): boolean {
+    if (this.state === "dead") {
+      return false;
+    }
+
     const size = this.getRenderSize();
     return (
       point.x >= this.position.x - size.width * 0.46 &&
@@ -222,6 +354,11 @@ export class Enemy {
   }
 
   draw(container: Container): void {
+    if (this.state === "dead") {
+      this.drawDead(container);
+      return;
+    }
+
     const source = this.getSourceRect();
 
     const graphics = new Graphics()
@@ -238,7 +375,6 @@ export class Enemy {
 
     const sprite = new Sprite(this.getFrameTexture(source));
     sprite.anchor.set(0.5, 1);
-    sprite.alpha = this.state === "neutralized" ? 0.52 : 1;
     sprite.position.set(this.position.x, this.position.y);
     sprite.scale.set(
       source.flipX ? -GAME_CONFIG.enemy.renderScale : GAME_CONFIG.enemy.renderScale,
@@ -246,15 +382,8 @@ export class Enemy {
     );
     container.addChild(sprite);
 
-    if (this.state === "neutralized") {
-      container.addChild(
-        new Graphics()
-          .moveTo(this.position.x - 18, this.position.y - 50)
-          .lineTo(this.position.x + 18, this.position.y - 24)
-          .moveTo(this.position.x + 18, this.position.y - 50)
-          .lineTo(this.position.x - 18, this.position.y - 24)
-          .stroke({ color: "#141410", alpha: 0.9, width: 4 })
-      );
+    if (this.health < GAME_CONFIG.combat.maxHealth) {
+      this.drawHealthBar(container);
     }
   }
 
@@ -277,7 +406,13 @@ export class Enemy {
   }
 
   private getSourceRect(): { x: number; y: number; width: number; height: number; flipX: boolean } {
-    const motion: MovingMotion = this.state === "shooting" ? "run" : this.state === "responding" ? "run" : "walk";
+    const motion: MovingMotion =
+      this.state === "shooting" ||
+      this.state === "responding" ||
+      this.state === "rescuing" ||
+      this.state === "searching"
+        ? "run"
+        : "walk";
     const rowRule = ROW_OFFSETS[this.direction];
     const row =
       this.state === "bound"
@@ -295,11 +430,128 @@ export class Enemy {
     };
   }
 
+  private getDeathSourceRect(): {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    flipX: boolean;
+  } | null {
+    const deadRow = ENEMY_SHEET.deadRow ?? ENEMY_SHEET.rows - 1;
+
+    if (deadRow < 0 || deadRow >= ENEMY_SHEET.rows) {
+      return null;
+    }
+
+    const frameIndex = Math.min(
+      Math.max(0, ENEMY_SHEET.deadFrame ?? this.frameIndex),
+      ENEMY_SHEET.columns - 1
+    );
+
+    return {
+      x: frameIndex * ENEMY_SHEET.frameWidth,
+      y: deadRow * ENEMY_SHEET.frameHeight,
+      width: ENEMY_SHEET.frameWidth,
+      height: ENEMY_SHEET.frameHeight,
+      flipX: this.direction === "left" || this.direction === "up-left" || this.direction === "down-left"
+    };
+  }
+
   private getRenderSize(): { width: number; height: number } {
     return {
       width: ENEMY_SHEET.frameWidth * GAME_CONFIG.enemy.renderScale,
       height: ENEMY_SHEET.frameHeight * GAME_CONFIG.enemy.renderScale
     };
+  }
+
+  takeDamage(amount: number): boolean {
+    if (this.state === "dead") {
+      return false;
+    }
+
+    this.health = Math.max(0, this.health - amount);
+
+    if (this.health > 0) {
+      return false;
+    }
+
+    this.die();
+    return true;
+  }
+
+  isDead(): boolean {
+    return this.state === "dead";
+  }
+
+  private die(): void {
+    this.state = "dead";
+    this.health = 0;
+    this.targetPosition = null;
+    this.alertedBy = null;
+    this.rescueTargetId = null;
+    this.frameIndex = 0;
+    this.animationElapsed = 0;
+    this.stateElapsed = 0;
+  }
+
+  private advanceDeathAnimation(deltaTime: number): void {
+    const frameDuration = 1 / GAME_CONFIG.combat.deathFps;
+    this.animationElapsed += deltaTime;
+
+    while (
+      this.animationElapsed >= frameDuration &&
+      this.frameIndex < ENEMY_SHEET.columns - 1
+    ) {
+      this.frameIndex += 1;
+      this.animationElapsed -= frameDuration;
+    }
+  }
+
+  private drawDeathMarker(container: Container): void {
+    container.addChild(
+      new Graphics()
+        .moveTo(this.position.x - 20, this.position.y - 64)
+        .lineTo(this.position.x + 20, this.position.y - 24)
+        .moveTo(this.position.x + 20, this.position.y - 64)
+        .lineTo(this.position.x - 20, this.position.y - 24)
+        .stroke({ color: "#f25f4c", alpha: 0.96, width: 6, cap: "round" })
+    );
+  }
+
+  private drawDead(container: Container): void {
+    const source = this.getDeathSourceRect();
+
+    if (!source) {
+      this.drawDeathMarker(container);
+      return;
+    }
+
+    const sprite = new Sprite(this.getFrameTexture(source));
+    sprite.anchor.set(0.5, 1);
+    sprite.position.set(this.position.x, this.position.y);
+    sprite.scale.set(
+      source.flipX ? -GAME_CONFIG.enemy.renderScale : GAME_CONFIG.enemy.renderScale,
+      GAME_CONFIG.enemy.renderScale
+    );
+    container.addChild(sprite);
+  }
+
+  private drawHealthBar(container: Container): void {
+    const width = 48;
+    const height = 6;
+    const x = this.position.x - width / 2;
+    const y = this.position.y - this.getRenderSize().height - 12;
+    const fillWidth = width * (this.health / GAME_CONFIG.combat.maxHealth);
+
+    container.addChild(
+      new Graphics()
+        .rect(x, y, width, height)
+        .fill({ color: "#151812", alpha: 0.86 })
+        .rect(x, y, fillWidth, height)
+        .fill(this.health > 50 ? "#7dd35f" : "#f0c15d")
+        .rect(x, y, width, height)
+        .stroke({ color: "#10140d", alpha: 0.9, width: 1 })
+    );
   }
 
   private getFrameTexture(source: {
@@ -327,8 +579,53 @@ export class Enemy {
   private setNextPatrolTarget(): void {
     this.state = "patrol";
     this.alertedBy = null;
+    this.rescueTargetId = null;
     this.routeIndex = (this.routeIndex + 1) % this.route.length;
     this.targetPosition = clonePoint(this.route[this.routeIndex]);
+  }
+
+  private setNextAlarmRouteTarget(): void {
+    this.targetPosition = clonePoint(this.alarmRoute[this.alarmRouteIndex]);
+  }
+
+  private advanceAlarmRoute(): void {
+    this.alarmRouteVisits += 1;
+
+    if (this.alarmRouteVisits >= this.alarmRoute.length) {
+      this.resumePatrol();
+      return;
+    }
+
+    this.alarmRouteIndex = (this.alarmRouteIndex + 1) % this.alarmRoute.length;
+    this.targetPosition = clonePoint(this.alarmRoute[this.alarmRouteIndex]);
+  }
+
+  private resumePatrol(): void {
+    this.state = "patrol";
+    this.alertedBy = null;
+    this.rescueTargetId = null;
+    this.alarmRouteVisits = 0;
+    this.routeIndex = this.findClosestRouteIndex(this.route);
+    this.targetPosition = clonePoint(this.route[this.routeIndex]);
+    this.frameIndex = 0;
+    this.animationElapsed = 0;
+    this.stateElapsed = 0;
+  }
+
+  private findClosestRouteIndex(route: WorldPoint[]): number {
+    let closestIndex = 0;
+    let closestDistance = distanceSquared(this.position, route[0]);
+
+    for (let index = 1; index < route.length; index += 1) {
+      const routeDistance = distanceSquared(this.position, route[index]);
+
+      if (routeDistance < closestDistance) {
+        closestDistance = routeDistance;
+        closestIndex = index;
+      }
+    }
+
+    return closestIndex;
   }
 
   private advanceAnimation(_motion: MovingMotion, fps: number, deltaTime: number): void {

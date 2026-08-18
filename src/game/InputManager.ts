@@ -10,7 +10,7 @@ export interface CanvasCommand {
 export interface InputCallbacks {
   onCanvasCommand(command: CanvasCommand): void;
   onCursorMove(worldPosition: WorldPoint): void;
-  onKeyDown(key: string, code: string): void;
+  onKeyDown(key: string, code: string, repeat: boolean): void;
 }
 
 export class InputManager {
@@ -47,7 +47,7 @@ export class InputManager {
   };
 
   private handleKeyDown = (event: KeyboardEvent): void => {
-    this.callbacks.onKeyDown(event.key, event.code);
+    this.callbacks.onKeyDown(event.key, event.code, event.repeat);
   };
 
   private eventToWorld(event: MouseEvent): WorldPoint {

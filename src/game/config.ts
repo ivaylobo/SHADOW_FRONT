@@ -5,6 +5,9 @@ export interface SpriteRowRule {
   flipX: boolean;
 }
 
+const ENEMY_VISION_RANGE = 320;
+const KALASHNIKOV_RANGE_ADVANTAGE = 100;
+
 export const ASSET_BASE_PATH = "/assets/characters/";
 export const SPRITE_MANIFEST_PATH = `${ASSET_BASE_PATH}movement-sprites-manifest-6frames.json`;
 
@@ -24,6 +27,12 @@ export const GAME_CONFIG = {
     run: 155,
     crawl: 45
   } satisfies Record<MovingMotion, number>,
+  combat: {
+    maxHealth: 100,
+    kalashnikovDamage: 50,
+    enemyShotInterval: 0.85,
+    deathFps: 8
+  },
   animationFps: {
     walk: 10,
     run: 14,
@@ -33,11 +42,13 @@ export const GAME_CONFIG = {
     sprite: {
       file: "enemy_movement_8dir_6frames_v6_bound.png",
       columns: 6,
-      rows: 26,
+      rows: 27,
       sheetWidth: 368,
-      sheetHeight: 2130,
+      sheetHeight: 2212,
       shootRow: 24,
-      boundRow: 25
+      boundRow: 25,
+      deadRow: 26,
+      deadFrame: null as number | null
     },
     renderScale: 1.46,
     walkSpeed: 76,
@@ -45,14 +56,15 @@ export const GAME_CONFIG = {
     walkFps: 10,
     runFps: 14,
     shootFps: 12,
-    visionRange: 320,
+    visionRange: ENEMY_VISION_RANGE,
     closeVisionRatio: 0.5,
     baseVisionAngleDegrees: 20,
     sweepAngleDegrees: 60,
     sweepPeriodSeconds: 2.4,
     eyeOffsetY: -78,
     hitPointOffsetY: -46,
-    hitRadius: 28,
+    hitRadius: 42,
+    rescueRange: 34,
     alarmDuration: 2.8
   },
   tie: {
@@ -103,7 +115,7 @@ export const GAME_CONFIG = {
     shoot: {
       fps: 12,
       duration: 0.55,
-      range: 320
+      range: ENEMY_VISION_RANGE + KALASHNIKOV_RANGE_ADVANTAGE
     },
     photo: {
       fps: 10,
@@ -123,47 +135,47 @@ export const GAME_CONFIG = {
 
 export const CONTROL_HELP: ControlHelpItem[] = [
   {
-    command: "Hover + клик върху враг",
-    description: "героят следва врага и го връзва с въже, ако го настигне"
+    command: "Hover + click enemy",
+    description: "Follow the enemy and tie them if close enough"
   },
   {
-    command: "Ляв клик върху герой",
-    description: "избира героя"
+    command: "Left-click hero",
+    description: "Select the hero"
   },
   {
-    command: "Ляв клик върху терена",
-    description: "героят ходи до точката"
+    command: "Left-click terrain",
+    description: "Move the selected hero to that point"
   },
   {
     command: "X",
-    description: "Мая снима artifact отблизо; Альоша стреля към курсора до ограничен range"
+    description: "Maya photographs the artifact up close; Alyosha fires toward the cursor within range"
   },
   {
-    command: "Shift + ляв клик",
-    description: "героят тича до точката"
+    command: "Shift + left-click",
+    description: "Run to the point"
   },
   {
-    command: "Двоен ляв клик",
-    description: "героят тича до точката"
+    command: "Double left-click",
+    description: "Run to the point"
   },
   {
     command: "C",
-    description: "лягане или изправяне"
+    description: "Toggle prone/upright stance"
   },
   {
     command: "1",
-    description: "избор на Мая"
+    description: "Select Maya"
   },
   {
     command: "2",
-    description: "избор на Альоша"
+    description: "Select Alyosha"
   },
   {
     command: "Escape",
-    description: "прекратяване на текущото движение"
+    description: "Stop the current movement"
   },
   {
     command: "D",
-    description: "показване или скриване на debug информация"
+    description: "Toggle debug information"
   }
 ];

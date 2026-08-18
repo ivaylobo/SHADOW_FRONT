@@ -8,6 +8,7 @@ import { Enemy } from "./entities/Enemy";
 import {
   circleIntersectsPolygon,
   distance,
+  distanceSquared,
   distanceToSegment,
   getMaxY,
   getPolygonCenter,
@@ -34,10 +35,31 @@ interface Marker {
   duration: number;
 }
 
-interface RenderItem {
-  sortY: number;
-  draw(): void;
+interface TimedEffect {
+  age: number;
+  duration: number;
 }
+
+type RenderItem =
+  | {
+      sortY: number;
+      kind: "obstacle";
+      object: ObliquePrism;
+    }
+  | {
+      sortY: number;
+      kind: "enemy";
+      enemy: Enemy;
+    }
+  | {
+      sortY: number;
+      kind: "photo";
+    }
+  | {
+      sortY: number;
+      kind: "character";
+      character: Character;
+    };
 
 interface ShotTrace {
   from: WorldPoint;
@@ -66,6 +88,11 @@ interface TieAttempt {
   enemyId: EnemyId;
 }
 
+interface EnemyShotState {
+  targetId: CharacterId;
+  cooldown: number;
+}
+
 export class Game {
   private readonly level = testLevel;
   private readonly assetLoader = new AssetLoader();
@@ -75,6 +102,7 @@ export class Game {
   private readonly loop = new GameLoop();
   private readonly characters = new Map<CharacterId, Character>();
   private readonly enemies = new Map<EnemyId, Enemy>();
+  private readonly renderItems: RenderItem[] = [];
   private readonly photoArtifact = {
     position: { x: 880, y: 715 },
     radius: 26,
@@ -90,8 +118,11 @@ export class Game {
   private shotTraces: ShotTrace[] = [];
   private photoFlashes: PhotoFlash[] = [];
   private alarmFlash: AlarmFlash | null = null;
+  private alarmActive = false;
   private elapsedTime = 0;
   private readonly tieAttempts = new Map<CharacterId, TieAttempt>();
+  private readonly aimTargets = new Map<CharacterId, EnemyId>();
+  private readonly enemyShotStates = new Map<EnemyId, EnemyShotState>();
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -105,7 +136,7 @@ export class Game {
   async start(): Promise<void> {
     await this.renderer.init();
     this.resizeCanvas();
-    this.renderMessage("Зареждане на спрайтове...");
+    this.renderMessage("Loading sprites...");
 
     try {
       const assets = await this.assetLoader.loadCharacterAssets();
@@ -115,7 +146,7 @@ export class Game {
         "maya",
         new Character({
           id: "maya",
-          name: "Мая",
+          name: "Maya",
           image: assets.images.maya,
           initialPosition: this.level.initialPositions.maya,
           animator
@@ -125,7 +156,7 @@ export class Game {
         "alyosha",
         new Character({
           id: "alyosha",
-          name: "Альоша",
+          name: "Alyosha",
           image: assets.images.alyosha,
           initialPosition: this.level.initialPositions.alyosha,
           animator
@@ -138,7 +169,8 @@ export class Game {
             id: patrol.id,
             name: patrol.name,
             image: assets.enemyImage,
-            route: patrol.route
+            route: patrol.route,
+            alarmRoute: patrol.alarmRoute
           })
         );
       }
@@ -148,9 +180,10 @@ export class Game {
         onCanvasCommand: (command) => this.handleCanvasCommand(command),
         onCursorMove: (worldPosition) => {
           this.cursorWorld = worldPosition;
+          this.updateAimTargetFromPoint(worldPosition);
           this.updateCanvasCursor();
         },
-        onKeyDown: (key, code) => this.handleKeyDown(key, code)
+        onKeyDown: (key, code, repeat) => this.handleKeyDown(key, code, repeat)
       });
       this.resizeObserver = new ResizeObserver(this.resizeCanvas);
       this.resizeObserver.observe(this.canvas.parentElement ?? this.canvas);
@@ -158,7 +191,7 @@ export class Game {
       this.loop.start((deltaTime) => this.frame(deltaTime));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.renderMessage(`Грешка при зареждане: ${message}`, "#ffb4a8");
+      this.renderMessage(`Load error: ${message}`, "#ffb4a8");
       throw error;
     }
   }
@@ -186,26 +219,14 @@ export class Game {
       );
     }
     this.updateTieAttempts();
+    this.updateRescueAttempts();
+    this.updateEnemyShooting(deltaTime);
     this.updateEnemyDetection();
+    this.updateAlarmState();
 
-    this.markers = this.markers
-      .map((marker) => ({
-        ...marker,
-        age: marker.age + deltaTime
-      }))
-      .filter((marker) => marker.age <= marker.duration);
-    this.shotTraces = this.shotTraces
-      .map((trace) => ({
-        ...trace,
-        age: trace.age + deltaTime
-      }))
-      .filter((trace) => trace.age <= trace.duration);
-    this.photoFlashes = this.photoFlashes
-      .map((flash) => ({
-        ...flash,
-        age: flash.age + deltaTime
-      }))
-      .filter((flash) => flash.age <= flash.duration);
+    this.updateTimedEffects(this.markers, deltaTime);
+    this.updateTimedEffects(this.shotTraces, deltaTime);
+    this.updateTimedEffects(this.photoFlashes, deltaTime);
     if (this.alarmFlash) {
       this.alarmFlash.age += deltaTime;
       if (this.alarmFlash.age >= this.alarmFlash.duration) {
@@ -220,6 +241,22 @@ export class Game {
       state: selectedCharacter.state
     });
     this.controlsPanel.setDebug(this.debugEnabled, this.buildDebugReadout(selectedCharacter));
+  }
+
+  private updateTimedEffects<T extends TimedEffect>(items: T[], deltaTime: number): void {
+    let writeIndex = 0;
+
+    for (let readIndex = 0; readIndex < items.length; readIndex += 1) {
+      const item = items[readIndex];
+      item.age += deltaTime;
+
+      if (item.age <= item.duration) {
+        items[writeIndex] = item;
+        writeIndex += 1;
+      }
+    }
+
+    items.length = writeIndex;
   }
 
   private render(): void {
@@ -244,6 +281,9 @@ export class Game {
   }
 
   private handleCanvasCommand(command: CanvasCommand): void {
+    this.cursorWorld = command.worldPosition;
+    this.updateAimTargetFromPoint(command.worldPosition);
+
     const clickedCharacter = this.findCharacterAt(command.worldPosition);
 
     if (clickedCharacter) {
@@ -258,7 +298,14 @@ export class Game {
     const selectedCharacter = this.getSelectedCharacter();
     const clickedEnemy = this.findEnemyAt(command.worldPosition);
 
+    if (selectedCharacter.isDead()) {
+      this.addMarker(command.worldPosition, "invalid");
+      return;
+    }
+
     if (clickedEnemy) {
+      this.aimTargets.set(selectedCharacter.id, clickedEnemy.id);
+
       if (!this.startTieAttempt(selectedCharacter, clickedEnemy)) {
         this.addMarker(clickedEnemy.position, "invalid");
         return;
@@ -277,6 +324,7 @@ export class Game {
     }
 
     this.tieAttempts.delete(selectedCharacter.id);
+    this.aimTargets.delete(selectedCharacter.id);
     selectedCharacter.setTarget(command.worldPosition, requestedMotion);
     this.addMarker(command.worldPosition, "target");
   }
@@ -284,10 +332,16 @@ export class Game {
   private triggerSelectedSpecialAction(): void {
     const character = this.getSelectedCharacter();
 
-    if (character.state.action) {
+    if (character.isDead() || (character.state.action && character.state.action !== "shoot")) {
+      this.logCombat("player shot blocked", {
+        character: character.id,
+        dead: character.isDead(),
+        action: character.state.action
+      });
       return;
     }
 
+    const pendingEnemyTargetId = this.tieAttempts.get(character.id)?.enemyId ?? null;
     this.tieAttempts.delete(character.id);
 
     if (character.id === "maya") {
@@ -306,9 +360,19 @@ export class Game {
     }
 
     const shotOrigin = this.getShotOrigin(character);
-    const shotTarget = this.getShotTarget(character, shotOrigin);
+    const shotTarget = this.getShotTarget(character, shotOrigin, pendingEnemyTargetId);
     const shotHit = this.findShotHit(shotOrigin, shotTarget);
     const traceTarget = shotHit?.point ?? shotTarget;
+
+    this.logCombat("player shot", {
+      shooter: character.id,
+      origin: this.formatPoint(shotOrigin),
+      target: this.formatPoint(shotTarget),
+      cursor: this.formatPoint(this.cursorWorld),
+      pendingEnemyTargetId,
+      lockedEnemyTargetId: this.aimTargets.get(character.id) ?? null,
+      hitEnemyId: shotHit?.enemy.id ?? null
+    });
 
     character.startSpecialAction("shoot", shotTarget);
     this.shotTraces.push({
@@ -317,11 +381,38 @@ export class Game {
       age: 0,
       duration: 0.18
     });
+    this.triggerGunshotAlarm(character, shotOrigin);
 
-    shotHit?.enemy.neutralize();
+    if (!shotHit) {
+      this.logCombat("player shot miss", {
+        shooter: character.id,
+        target: this.formatPoint(shotTarget)
+      });
+      return;
+    }
+
+    const healthBefore = shotHit.enemy.health;
+    const killed = shotHit.enemy.takeDamage(GAME_CONFIG.combat.kalashnikovDamage);
+
+    this.logCombat("player shot hit", {
+      shooter: character.id,
+      enemy: shotHit.enemy.id,
+      healthBefore,
+      healthAfter: shotHit.enemy.health,
+      enemyState: shotHit.enemy.state,
+      killed
+    });
+
+    if (killed) {
+      this.clearAimTarget(shotHit.enemy.id);
+      this.enemyShotStates.delete(shotHit.enemy.id);
+    } else {
+      this.aimTargets.set(character.id, shotHit.enemy.id);
+      this.startEnemyShooting(shotHit.enemy, character, "hit-by-player");
+    }
   }
 
-  private handleKeyDown(key: string, code: string): void {
+  private handleKeyDown(key: string, code: string, repeat: boolean): void {
     const normalizedKey = key.toLowerCase();
 
     if (normalizedKey === "1" || code === "Digit1" || code === "Numpad1") {
@@ -334,12 +425,23 @@ export class Game {
       return;
     }
 
-    if (normalizedKey === "c" || normalizedKey === "с" || code === "KeyC") {
+    if (normalizedKey === "c" || code === "KeyC") {
       this.getSelectedCharacter().toggleStance();
       return;
     }
 
-    if (normalizedKey === "x" || normalizedKey === "х" || code === "KeyX") {
+    if (normalizedKey === "x" || code === "KeyX") {
+      if (repeat) {
+        this.logCombat("key x ignored repeat", {
+          selected: this.getSelectedCharacter().id
+        });
+        return;
+      }
+
+      this.logCombat("key x", {
+        selected: this.getSelectedCharacter().id,
+        action: this.getSelectedCharacter().state.action
+      });
       this.triggerSelectedSpecialAction();
       return;
     }
@@ -348,10 +450,11 @@ export class Game {
       const character = this.getSelectedCharacter();
       character.stop();
       this.tieAttempts.delete(character.id);
+      this.aimTargets.delete(character.id);
       return;
     }
 
-    if (normalizedKey === "d" || normalizedKey === "д" || code === "KeyD") {
+    if (normalizedKey === "d" || code === "KeyD") {
       this.debugEnabled = !this.debugEnabled;
     }
   }
@@ -373,19 +476,76 @@ export class Game {
   }
 
   private findCharacterAt(point: WorldPoint): Character | null {
-    const charactersFrontToBack = [...this.characters.values()].sort(
-      (a, b) => b.state.position.y - a.state.position.y
-    );
+    let topCharacter: Character | null = null;
+    let topY = -Infinity;
 
-    return charactersFrontToBack.find((character) => character.containsWorldPoint(point)) ?? null;
+    for (const character of this.characters.values()) {
+      const sortY = character.state.position.y;
+
+      if (sortY <= topY || !character.containsWorldPoint(point)) {
+        continue;
+      }
+
+      topCharacter = character;
+      topY = sortY;
+    }
+
+    return topCharacter;
   }
 
   private findEnemyAt(point: WorldPoint): Enemy | null {
-    const enemiesFrontToBack = [...this.enemies.values()].sort(
-      (a, b) => b.position.y - a.position.y
-    );
+    let topEnemy: Enemy | null = null;
+    let topY = -Infinity;
 
-    return enemiesFrontToBack.find((enemy) => enemy.containsWorldPoint(point)) ?? null;
+    for (const enemy of this.enemies.values()) {
+      const sortY = enemy.position.y;
+
+      if (sortY <= topY || !enemy.containsWorldPoint(point)) {
+        continue;
+      }
+
+      topEnemy = enemy;
+      topY = sortY;
+    }
+
+    return topEnemy;
+  }
+
+  private updateAimTargetFromPoint(point: WorldPoint): void {
+    const selectedCharacter = this.getSelectedCharacter();
+    const enemy = this.findEnemyAt(point);
+
+    if (enemy && !enemy.isDead()) {
+      this.aimTargets.set(selectedCharacter.id, enemy.id);
+      return;
+    }
+
+    this.aimTargets.delete(selectedCharacter.id);
+  }
+
+  private getAimTarget(characterId: CharacterId): Enemy | null {
+    const targetId = this.aimTargets.get(characterId);
+
+    if (!targetId) {
+      return null;
+    }
+
+    const target = this.enemies.get(targetId) ?? null;
+
+    if (!target || target.isDead()) {
+      this.aimTargets.delete(characterId);
+      return null;
+    }
+
+    return target;
+  }
+
+  private clearAimTarget(enemyId: EnemyId): void {
+    for (const [characterId, targetId] of this.aimTargets) {
+      if (targetId === enemyId) {
+        this.aimTargets.delete(characterId);
+      }
+    }
   }
 
   private getHoveredTieEnemy(): Enemy | null {
@@ -402,6 +562,10 @@ export class Game {
   }
 
   private startTieAttempt(character: Character, enemy: Enemy): boolean {
+    if (character.isDead()) {
+      return false;
+    }
+
     if (character.state.stance !== "upright") {
       return false;
     }
@@ -478,7 +642,7 @@ export class Game {
   }
 
   private isEnemyUnavailableForTie(enemy: Enemy): boolean {
-    return enemy.state === "shooting" || enemy.state === "neutralized" || enemy.state === "bound";
+    return enemy.state === "shooting" || enemy.state === "dead" || enemy.state === "bound";
   }
 
   private hasTieLineOfSight(character: Character, enemy: Enemy): boolean {
@@ -499,35 +663,214 @@ export class Game {
     };
   }
 
+  private updateEnemyShooting(deltaTime: number): void {
+    for (const enemy of this.enemies.values()) {
+      const shotState = this.enemyShotStates.get(enemy.id);
+
+      if (enemy.state !== "shooting") {
+        if (shotState) {
+          this.enemyShotStates.delete(enemy.id);
+        }
+        continue;
+      }
+
+      const currentTarget = shotState ? this.characters.get(shotState.targetId) : null;
+      const target =
+        currentTarget && this.canEnemyShootCharacter(enemy, currentTarget)
+          ? currentTarget
+          : this.findEnemyShootTarget(enemy);
+
+      if (!target) {
+        this.stopEnemyShooting(enemy, "no-shootable-target");
+        continue;
+      }
+
+      enemy.faceTarget(target.state.position);
+
+      const nextShotState: EnemyShotState = shotState ?? {
+        targetId: target.id,
+        cooldown: GAME_CONFIG.combat.enemyShotInterval
+      };
+      nextShotState.targetId = target.id;
+      nextShotState.cooldown -= deltaTime;
+
+      if (nextShotState.cooldown <= 0) {
+        this.fireEnemyShot(enemy, target, "cooldown");
+        nextShotState.cooldown = GAME_CONFIG.combat.enemyShotInterval;
+      }
+
+      this.enemyShotStates.set(enemy.id, nextShotState);
+    }
+  }
+
+  private startEnemyShooting(enemy: Enemy, target: Character, reason: string): void {
+    if (enemy.isDead() || target.isDead()) {
+      return;
+    }
+
+    enemy.startShooting(target.state.position);
+    this.enemyShotStates.set(enemy.id, {
+      targetId: target.id,
+      cooldown: GAME_CONFIG.combat.enemyShotInterval
+    });
+
+    this.logCombat("enemy shooting started", {
+      enemy: enemy.id,
+      target: target.id,
+      reason,
+      enemyHealth: enemy.health,
+      targetHealth: target.state.health
+    });
+
+    this.fireEnemyShot(enemy, target, reason);
+  }
+
+  private fireEnemyShot(enemy: Enemy, target: Character, reason: string): void {
+    if (!this.canEnemyShootCharacter(enemy, target)) {
+      this.logCombat("enemy shot blocked", {
+        enemy: enemy.id,
+        target: target.id,
+        reason,
+        enemyState: enemy.state,
+        targetDead: target.isDead()
+      });
+      return;
+    }
+
+    enemy.faceTarget(target.state.position);
+    const healthBefore = target.state.health;
+    const killed = this.damageCharacter(target, enemy);
+
+    this.logCombat("enemy shot hit", {
+      enemy: enemy.id,
+      target: target.id,
+      reason,
+      healthBefore,
+      healthAfter: target.state.health,
+      killed
+    });
+  }
+
+  private canEnemyShootCharacter(enemy: Enemy, character: Character): boolean {
+    if (enemy.isDead() || enemy.state === "bound" || character.isDead()) {
+      return false;
+    }
+
+    const from = enemy.getVision().eye;
+    const to = this.getCharacterSightPoint(character);
+    const range = GAME_CONFIG.specialActions.shoot.range;
+
+    return distanceSquared(from, to) <= range * range && this.hasLineOfSight(from, to);
+  }
+
+  private findEnemyShootTarget(enemy: Enemy): Character | null {
+    let nearestTarget: Character | null = null;
+    let nearestDistance = Infinity;
+
+    for (const character of this.characters.values()) {
+      if (!this.canEnemyShootCharacter(enemy, character)) {
+        continue;
+      }
+
+      const targetDistance = distanceSquared(enemy.position, character.state.position);
+
+      if (targetDistance < nearestDistance) {
+        nearestTarget = character;
+        nearestDistance = targetDistance;
+      }
+    }
+
+    return nearestTarget;
+  }
+
+  private stopEnemyShooting(enemy: Enemy, reason: string): void {
+    this.enemyShotStates.delete(enemy.id);
+    enemy.stopShooting();
+    if (this.alarmActive) {
+      enemy.startAlarmSearch();
+    }
+    this.logCombat("enemy shooting stopped", {
+      enemy: enemy.id,
+      reason
+    });
+  }
+
   private updateEnemyDetection(): void {
     for (const enemy of this.enemies.values()) {
       if (
         enemy.state === "shooting" ||
-        enemy.state === "neutralized" ||
+        enemy.state === "dead" ||
         enemy.state === "bound"
       ) {
         continue;
       }
 
-      const detected = [...this.characters.values()].find((character) =>
-        this.canEnemySeeCharacter(enemy, character)
-      );
+      const detected = this.findVisibleCharacter(enemy);
 
-      if (!detected) {
+      if (detected) {
+        this.startEnemyShooting(enemy, detected, "vision");
+        this.triggerAlarmAt(detected.state.position, "enemy-saw-character", enemy.id);
         continue;
       }
 
-      enemy.startShooting(detected.state.position);
-      this.triggerAlarm(enemy);
+      const boundEnemy = this.findVisibleBoundEnemy(enemy);
+      if (boundEnemy && !this.isRescueInProgress(boundEnemy.id)) {
+        this.alarmActive = true;
+        enemy.startRescue(boundEnemy);
+      }
     }
   }
 
   private canEnemySeeCharacter(enemy: Enemy, character: Character): boolean {
-    const vision = enemy.getVision();
+    if (character.isDead()) {
+      return false;
+    }
+
     const target = {
       x: character.state.position.x,
       y: character.state.position.y - 42
     };
+    const targetDistance = this.getEnemyVisionDistance(enemy, target);
+
+    if (targetDistance === null) {
+      return false;
+    }
+
+    const vision = enemy.getVision();
+
+    if (targetDistance <= vision.closeRange) {
+      return true;
+    }
+
+    return character.state.stance !== "prone";
+  }
+
+  private findVisibleCharacter(enemy: Enemy): Character | null {
+    for (const character of this.characters.values()) {
+      if (this.canEnemySeeCharacter(enemy, character)) {
+        return character;
+      }
+    }
+
+    return null;
+  }
+
+  private findVisibleBoundEnemy(watcher: Enemy): Enemy | null {
+    for (const enemy of this.enemies.values()) {
+      if (
+        enemy.id !== watcher.id &&
+        enemy.state === "bound" &&
+        this.getEnemyVisionDistance(watcher, this.getEnemyTiePoint(enemy)) !== null
+      ) {
+        return enemy;
+      }
+    }
+
+    return null;
+  }
+
+  private getEnemyVisionDistance(enemy: Enemy, target: WorldPoint): number | null {
+    const vision = enemy.getVision();
     const toTarget = {
       x: target.x - vision.eye.x,
       y: target.y - vision.eye.y
@@ -535,24 +878,80 @@ export class Game {
     const targetDistance = Math.hypot(toTarget.x, toTarget.y);
 
     if (targetDistance > vision.farRange || targetDistance < 0.001) {
-      return false;
+      return null;
     }
 
     const angleToTarget = Math.atan2(toTarget.y, toTarget.x);
     const angleDelta = Math.abs(this.angleDifference(angleToTarget, vision.sweepFacingAngle));
     if (angleDelta > vision.halfAngle) {
-      return false;
+      return null;
     }
 
     if (!this.hasLineOfSight(vision.eye, target)) {
-      return false;
+      return null;
     }
 
-    if (targetDistance <= vision.closeRange) {
-      return true;
+    return targetDistance;
+  }
+
+  private isRescueInProgress(enemyId: EnemyId): boolean {
+    for (const enemy of this.enemies.values()) {
+      if (enemy.rescueTargetId === enemyId) {
+        return true;
+      }
     }
 
-    return character.state.stance !== "prone";
+    return false;
+  }
+
+  private updateRescueAttempts(): void {
+    for (const rescuer of this.enemies.values()) {
+      if (!rescuer.rescueTargetId) {
+        continue;
+      }
+
+      const boundEnemy = this.enemies.get(rescuer.rescueTargetId);
+      if (!boundEnemy || boundEnemy.state !== "bound") {
+        rescuer.completeRescue();
+        continue;
+      }
+
+      rescuer.retargetRescue(boundEnemy);
+
+      if (
+        distanceSquared(rescuer.position, boundEnemy.position) >
+        GAME_CONFIG.enemy.rescueRange * GAME_CONFIG.enemy.rescueRange
+      ) {
+        continue;
+      }
+
+      boundEnemy.unbind();
+      rescuer.completeRescue();
+      this.startAlarmSearch();
+    }
+  }
+
+  private startAlarmSearch(): void {
+    this.alarmActive = true;
+
+    for (const enemy of this.enemies.values()) {
+      enemy.startAlarmSearch();
+    }
+  }
+
+  private updateAlarmState(): void {
+    if (!this.alarmActive) {
+      return;
+    }
+
+    for (const enemy of this.enemies.values()) {
+      if (enemy.hasAlarmWork()) {
+        this.alarmActive = true;
+        return;
+      }
+    }
+
+    this.alarmActive = false;
   }
 
   private findShotHit(from: WorldPoint, to: WorldPoint): { enemy: Enemy; point: WorldPoint } | null {
@@ -566,7 +965,7 @@ export class Game {
     let nearestHit: { enemy: Enemy; point: WorldPoint; distanceFromShooter: number } | null = null;
 
     for (const enemy of this.enemies.values()) {
-      if (enemy.state === "neutralized" || enemy.state === "bound") {
+      if (enemy.state === "dead") {
         continue;
       }
 
@@ -603,23 +1002,76 @@ export class Game {
     return nearestHit ? { enemy: nearestHit.enemy, point: nearestHit.point } : null;
   }
 
-  private triggerAlarm(source: Enemy): void {
+  private triggerGunshotAlarm(shooter: Character, shotOrigin: WorldPoint): void {
+    const investigationPosition = { ...shooter.state.position };
+    this.triggerAlarmAt(investigationPosition, "player-shot");
+    this.logCombat("gunshot alarm", {
+      shooter: shooter.id,
+      shotOrigin: this.formatPoint(shotOrigin),
+      investigationPosition: this.formatPoint(investigationPosition)
+    });
+  }
+
+  private triggerAlarmAt(
+    position: WorldPoint,
+    reason: string,
+    sourceEnemyId: EnemyId | null = null
+  ): void {
     this.alarmFlash = {
       age: 0,
       duration: GAME_CONFIG.enemy.alarmDuration
     };
+    this.alarmActive = true;
+
+    this.logCombat("alarm triggered", {
+      reason,
+      position: this.formatPoint(position),
+      sourceEnemyId
+    });
 
     for (const enemy of this.enemies.values()) {
-      if (enemy.id !== source.id) {
-        enemy.respondTo(source);
-      }
+      enemy.respondToPosition(position, sourceEnemyId);
     }
   }
 
+  private damageCharacter(character: Character, source: Enemy): boolean {
+    const killed = character.takeDamage(GAME_CONFIG.combat.kalashnikovDamage);
+
+    if (killed) {
+      this.tieAttempts.delete(character.id);
+      let nextAlive: Character | null = null;
+
+      for (const candidate of this.characters.values()) {
+        if (!candidate.isDead()) {
+          nextAlive = candidate;
+          break;
+        }
+      }
+
+      if (nextAlive) {
+        this.selectCharacter(nextAlive.id);
+      }
+    }
+
+    const vision = source.getVision();
+    this.shotTraces.push({
+      from: vision.eye,
+      to: this.getCharacterSightPoint(character),
+      age: 0,
+      duration: 0.18
+    });
+
+    return killed;
+  }
+
   private hasLineOfSight(from: WorldPoint, to: WorldPoint): boolean {
-    return !this.level.collisionPolygons.some((polygon) =>
-      this.segmentIntersectsPolygon(from, to, polygon.points)
-    );
+    for (const polygon of this.level.collisionPolygons) {
+      if (this.segmentIntersectsPolygon(from, to, polygon.points)) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private segmentIntersectsPolygon(from: WorldPoint, to: WorldPoint, polygon: WorldPoint[]): boolean {
@@ -643,9 +1095,13 @@ export class Game {
       return false;
     }
 
-    return !this.level.collisionPolygons.some((polygon) =>
-      circleIntersectsPolygon(position, radius, polygon.points)
-    );
+    for (const polygon of this.level.collisionPolygons) {
+      if (circleIntersectsPolygon(position, radius, polygon.points)) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private isCharacterPositionWalkable(character: Character, position: WorldPoint): boolean {
@@ -654,34 +1110,53 @@ export class Game {
     }
 
     const bodyPolygon = character.getBodyCollisionPolygon(position);
-    return !this.level.collisionPolygons.some((polygon) =>
-      polygonsIntersect(bodyPolygon, polygon.points)
-    );
+    for (const polygon of this.level.collisionPolygons) {
+      if (polygonsIntersect(bodyPolygon, polygon.points)) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private isMayaNearPhotoArtifact(): boolean {
     const maya = this.characters.get("maya");
 
-    if (!maya) {
+    if (!maya || maya.isDead()) {
       return false;
     }
 
     return (
-      distance(maya.state.position, this.photoArtifact.position) <=
-      this.photoArtifact.interactionRange
+      distanceSquared(maya.state.position, this.photoArtifact.position) <=
+      this.photoArtifact.interactionRange * this.photoArtifact.interactionRange
     );
   }
 
-  private getShotTarget(character: Character, origin: WorldPoint): WorldPoint {
+  private getShotTarget(
+    character: Character,
+    origin: WorldPoint,
+    pendingEnemyTargetId: EnemyId | null = null
+  ): WorldPoint {
     const range = GAME_CONFIG.specialActions.shoot.range;
-    const aimPoint = this.cursorWorld ?? this.getPointAhead(character, range, origin);
+    const pendingEnemyTarget = pendingEnemyTargetId ? this.enemies.get(pendingEnemyTargetId) : null;
+    const cursorEnemyTarget = this.cursorWorld ? this.findEnemyAt(this.cursorWorld) : null;
+    const aimTarget = this.getAimTarget(character.id);
+    const enemyTarget =
+      pendingEnemyTarget && !pendingEnemyTarget.isDead()
+        ? pendingEnemyTarget
+        : cursorEnemyTarget && !cursorEnemyTarget.isDead()
+          ? cursorEnemyTarget
+          : aimTarget;
+    const aimPoint = enemyTarget
+      ? this.getEnemyTiePoint(enemyTarget)
+      : this.cursorWorld ?? this.getPointAhead(character, range, origin);
     const aimDistance = distance(origin, aimPoint);
 
     if (aimDistance < 0.001) {
       return this.getPointAhead(character, range, origin);
     }
 
-    const clampedDistance = Math.min(aimDistance, range);
+    const clampedDistance = enemyTarget ? Math.min(aimDistance, range) : range;
     const scale = clampedDistance / aimDistance;
 
     return {
@@ -797,29 +1272,59 @@ export class Game {
   }
 
   private drawSortedRenderables(): void {
-    const items: RenderItem[] = [
-      ...this.level.decorativeObjects.map((object) => ({
+    const items = this.renderItems;
+    items.length = 0;
+
+    for (const object of this.level.decorativeObjects) {
+      items.push({
         sortY: getMaxY(object.footprint) + object.height,
-        draw: () => this.drawFlatObstacle(object)
-      })),
-      ...[...this.enemies.values()].map((enemy) => ({
+        kind: "obstacle",
+        object
+      });
+    }
+
+    for (const enemy of this.enemies.values()) {
+      items.push({
         sortY: enemy.position.y,
-        draw: () => enemy.draw(this.renderer.layers.sorted)
-      })),
-      {
-        sortY: this.photoArtifact.position.y,
-        draw: () => this.drawPhotoArtifact()
-      },
-      ...[...this.characters.values()].map((character) => ({
+        kind: "enemy",
+        enemy
+      });
+    }
+
+    items.push({
+      sortY: this.photoArtifact.position.y,
+      kind: "photo"
+    });
+
+    for (const character of this.characters.values()) {
+      items.push({
         sortY: character.state.position.y,
-        draw: () => character.draw(this.renderer.layers.sorted)
-      }))
-    ];
+        kind: "character",
+        character
+      });
+    }
 
     items.sort((a, b) => a.sortY - b.sortY);
 
     for (const item of items) {
-      item.draw();
+      this.drawRenderItem(item);
+    }
+  }
+
+  private drawRenderItem(item: RenderItem): void {
+    switch (item.kind) {
+      case "obstacle":
+        this.drawFlatObstacle(item.object);
+        return;
+      case "enemy":
+        item.enemy.draw(this.renderer.layers.sorted);
+        return;
+      case "photo":
+        this.drawPhotoArtifact();
+        return;
+      case "character":
+        item.character.draw(this.renderer.layers.sorted);
+        return;
     }
   }
 
@@ -932,7 +1437,7 @@ export class Game {
     this.renderer.layers.vision.addChild(graphics);
 
     for (const enemy of this.enemies.values()) {
-      if (enemy.state === "neutralized" || enemy.state === "bound") {
+      if (enemy.state === "dead" || enemy.state === "bound") {
         continue;
       }
 
@@ -1111,26 +1616,34 @@ export class Game {
       `direction: ${selected.state.direction}`,
       `motion: ${selected.state.motion}`,
       `frame: ${selected.state.frameIndex}`,
-      `enemies: ${[...this.enemies.values()].map((enemy) => `${enemy.id}:${enemy.state}`).join(" ")}`,
+      `heroes: ${[...this.characters.values()].map((character) => `${character.id}:${character.state.health}`).join(" ")}`,
+      `alarm: ${this.alarmActive ? "active" : "idle"}`,
+      `enemy shots: ${[...this.enemyShotStates.entries()]
+        .map(([enemyId, state]) => `${enemyId}->${state.targetId}:${state.cooldown.toFixed(2)}`)
+        .join(" ") || "-"}`,
+      `enemies: ${[...this.enemies.values()].map((enemy) => `${enemy.id}:${enemy.state}:${enemy.health}`).join(" ")}`,
       `debug collision: ${this.level.collisionPolygons.length} polygons`
     ].join("\n");
   }
 
   private drawAlarmIndicator(): void {
-    if (!this.alarmFlash) {
+    if (!this.alarmFlash && !this.alarmActive) {
       return;
     }
 
-    const progress = this.alarmFlash.age / this.alarmFlash.duration;
-    const pulse = 0.45 + Math.sin(progress * Math.PI * 18) * 0.22;
+    const pulse = this.alarmFlash
+      ? 0.45 + Math.sin((this.alarmFlash.age / this.alarmFlash.duration) * Math.PI * 18) * 0.22
+      : 0.55 + Math.sin(this.elapsedTime * Math.PI * 5.5) * 0.26;
 
     this.renderer.screenLayer.addChild(
       new Graphics()
         .circle(this.viewport.width - 42, 42, 20 + pulse * 5)
-        .fill({ color: "#ff1f1f", alpha: 0.58 + pulse * 0.28 })
+        .fill({ color: "#ff1f1f", alpha: this.alarmActive ? 0.76 + pulse * 0.18 : 0.58 + pulse * 0.28 })
         .stroke({ color: "#ffd2be", alpha: 0.82, width: 3 })
+        .circle(this.viewport.width - 42, 42, 8 + pulse * 2)
+        .fill({ color: "#ffd2be", alpha: 0.52 })
         .rect(0, 0, this.viewport.width, 8)
-        .fill({ color: "#780000", alpha: 0.34 })
+        .fill({ color: "#780000", alpha: this.alarmActive ? 0.46 : 0.34 })
     );
   }
 
@@ -1172,6 +1685,10 @@ export class Game {
     this.camera.setViewport(width, height);
     this.renderer.resize(width, height, pixelRatio);
   };
+
+  private logCombat(message: string, details: Record<string, unknown> = {}): void {
+    console.log(`[combat] ${message}`, details);
+  }
 
   private formatPoint(point: WorldPoint | null): string {
     if (!point) {

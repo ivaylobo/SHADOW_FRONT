@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="bg">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,31 +8,35 @@
   </head>
   <body>
     <div id="app">
-      <main id="game-shell" aria-label="Игрова зона">
+      <main id="game-shell" aria-label="Game area">
         <canvas id="game-canvas"></canvas>
       </main>
-      <aside id="side-panel" aria-label="Интерфейс">
+      <aside id="side-panel" aria-label="Interface">
         <section class="panel-section status-section">
-          <p class="label">Избран герой</p>
+          <p class="label">Selected Hero</p>
           <h1 id="selected-name">-</h1>
           <dl class="status-grid">
             <div>
-              <dt>Стойка</dt>
+              <dt>Stance</dt>
               <dd id="selected-stance">-</dd>
             </div>
             <div>
-              <dt>Движение</dt>
+              <dt>Motion</dt>
               <dd id="selected-motion">-</dd>
             </div>
             <div>
-              <dt>Цел</dt>
+              <dt>Health</dt>
+              <dd id="selected-health">-</dd>
+            </div>
+            <div>
+              <dt>Target</dt>
               <dd id="selected-target">-</dd>
             </div>
           </dl>
         </section>
 
         <details class="panel-section controls-section">
-          <summary>Управление</summary>
+          <summary>Controls</summary>
           <ul id="controls-list" class="controls-list"></ul>
         </details>
 

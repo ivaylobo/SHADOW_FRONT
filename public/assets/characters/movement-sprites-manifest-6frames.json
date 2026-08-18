@@ -1,11 +1,11 @@
 {
   "format": "sprite-sheet-v1",
   "columns": 6,
-  "rows": 27,
+  "rows": 28,
   "frameWidth": 58.833333333333336,
-  "frameHeight": 78.77777777777777,
+  "frameHeight": 78.78571428571429,
   "sheetWidth": 353,
-  "sheetHeight": 2127,
+  "sheetHeight": 2206,
   "framesPerAnimation": 6,
   "movementRows": 24,
   "specialRow": 24,
@@ -52,7 +52,8 @@
     "crawl-down-right",
     "special-upright",
     "special-prone",
-    "special-tie"
+    "special-tie",
+    "death"
   ],
   "specialRows": {
     "tie": 26
@@ -72,28 +73,34 @@
   "files": {
     "maya": {
       "file": "maya_movement_8dir_6frames_v11_tie.png",
-      "sha256": "93215ba850cb0b4a73ab200eb9c2a1ac9e9873060108f9c840d7e65208bd13c4",
-      "rows": 27,
-      "sheetHeight": 2127,
+      "sha256": "aa0122a6b018198d79632af477fa746a1de35656710e4055a66c706f95ecc78c",
+      "rows": 28,
+      "sheetHeight": 2206,
       "specialRows": {
         "photo": {
           "upright": 24,
           "prone": 25
         },
         "tie": 26
+      },
+      "death": {
+        "row": 27
       }
     },
     "alyosha": {
       "file": "alyosha_movement_8dir_6frames_v8_tie.png",
-      "sha256": "126a662a77844787db2b2db8aa52efe6d14eaeb6ba4e3b035aa8352675d1c48b",
-      "rows": 27,
-      "sheetHeight": 2127,
+      "sha256": "15ee0d3ea5cccb9216f3480de9ee18f60e654ae1bf2072328371b41db1aa7153",
+      "rows": 28,
+      "sheetHeight": 2206,
       "specialRows": {
         "shoot": {
           "upright": 24,
           "prone": 25
         },
         "tie": 26
+      },
+      "death": {
+        "row": 27
       }
     }
   }

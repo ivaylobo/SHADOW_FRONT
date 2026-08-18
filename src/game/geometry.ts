@@ -13,6 +13,13 @@ export function distance(a: WorldPoint, b: WorldPoint): number {
   return Math.hypot(b.x - a.x, b.y - a.y);
 }
 
+export function distanceSquared(a: WorldPoint, b: WorldPoint): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+
+  return dx * dx + dy * dy;
+}
+
 export function normalize(vector: WorldPoint): WorldPoint {
   const length = Math.hypot(vector.x, vector.y);
   if (length === 0) {
@@ -106,10 +113,10 @@ export function distanceToSegment(point: WorldPoint, a: WorldPoint, b: WorldPoin
     1
   );
 
-  return distance(point, {
-    x: a.x + t * segmentX,
-    y: a.y + t * segmentY
-  });
+  const closestX = a.x + t * segmentX;
+  const closestY = a.y + t * segmentY;
+
+  return Math.hypot(point.x - closestX, point.y - closestY);
 }
 
 export function circleIntersectsPolygon(
@@ -199,17 +206,17 @@ export function segmentsIntersect(a: WorldPoint, b: WorldPoint, c: WorldPoint, d
 }
 
 export function getPolygonCenter(points: WorldPoint[]): WorldPoint {
-  const total = points.reduce(
-    (sum, point) => ({
-      x: sum.x + point.x,
-      y: sum.y + point.y
-    }),
-    { x: 0, y: 0 }
-  );
+  let totalX = 0;
+  let totalY = 0;
+
+  for (const point of points) {
+    totalX += point.x;
+    totalY += point.y;
+  }
 
   return {
-    x: total.x / points.length,
-    y: total.y / points.length
+    x: totalX / points.length,
+    y: totalY / points.length
   };
 }
 
