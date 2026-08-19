@@ -77,9 +77,16 @@ export interface CaptiveCharacter {
   rescueRange: number;
 }
 
+export interface LevelDescription {
+  title: string;
+  paragraphs: string[];
+  completion: string;
+}
+
 export interface LevelDefinition {
   id: string;
   name: string;
+  description: LevelDescription;
   worldSize: {
     width: number;
     height: number;

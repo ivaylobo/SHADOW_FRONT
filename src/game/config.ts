@@ -60,6 +60,7 @@ export const GAME_CONFIG = {
     renderScale: 1.46,
     walkSpeed: 76,
     runSpeed: 130,
+    separationRadius: 52,
     walkFps: 10,
     runFps: 14,
     shootFps: 12,

@@ -30,6 +30,13 @@ export class Camera {
     });
   }
 
+  pan(delta: WorldPoint): void {
+    this.position = this.clampPosition({
+      x: this.position.x + delta.x,
+      y: this.position.y + delta.y
+    });
+  }
+
   worldToScreen(worldPoint: WorldPoint): WorldPoint {
     return {
       x: worldPoint.x - this.position.x,

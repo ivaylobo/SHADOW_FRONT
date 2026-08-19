@@ -137,6 +137,30 @@ summary {
   line-height: 1.35;
 }
 
+.level-description {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.level-description h2 {
+  margin: 0;
+  color: #f0eee5;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.level-description p {
+  margin: 0;
+  color: #b8c0ad;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.level-description .completion {
+  color: #e4d994;
+}
+
 .debug-section {
   color: #c9d4bd;
 }

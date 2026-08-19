@@ -1,4 +1,5 @@
 import { CONTROL_HELP } from "../config";
+import type { LevelDescription } from "../levels/LevelDefinition";
 import type { CharacterState } from "../types";
 
 export interface PanelStatus {
@@ -13,6 +14,8 @@ export class ControlsPanel {
   private selectedHealth: HTMLElement;
   private selectedTarget: HTMLElement;
   private controlsList: HTMLElement;
+  private descriptionTitle: HTMLElement;
+  private descriptionBody: HTMLElement;
   private debugPanel: HTMLElement;
   private debugReadout: HTMLElement;
 
@@ -23,6 +26,8 @@ export class ControlsPanel {
     this.selectedHealth = this.requireElement("#selected-health");
     this.selectedTarget = this.requireElement("#selected-target");
     this.controlsList = this.requireElement("#controls-list");
+    this.descriptionTitle = this.requireElement("#description-title");
+    this.descriptionBody = this.requireElement("#description-body");
     this.debugPanel = this.requireElement("#debug-panel");
     this.debugReadout = this.requireElement("#debug-readout");
 
@@ -39,6 +44,21 @@ export class ControlsPanel {
       : status.state.action ?? status.state.motion;
     this.selectedHealth.textContent = `${status.state.health}`;
     this.selectedTarget.textContent = status.state.targetPosition ? "active" : "none";
+  }
+
+  setLevelDescription(description: LevelDescription): void {
+    this.descriptionTitle.textContent = description.title;
+
+    const paragraphs = description.paragraphs.map((text) => {
+      const paragraph = document.createElement("p");
+      paragraph.textContent = text;
+      return paragraph;
+    });
+    const completion = document.createElement("p");
+    completion.className = "completion";
+    completion.textContent = description.completion;
+
+    this.descriptionBody.replaceChildren(...paragraphs, completion);
   }
 
   setDebug(enabled: boolean, readout: string): void {

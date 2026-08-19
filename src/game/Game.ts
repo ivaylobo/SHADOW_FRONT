@@ -192,6 +192,8 @@ export class Game {
   private alarmActive = false;
   private gameOver = false;
   private gameOverPromptShown = false;
+  private levelCompleted = false;
+  private levelCompletePromptShown = false;
   private elapsedTime = 0;
   private readonly tieAttempts = new Map<CharacterId, TieAttempt>();
   private readonly doorOpenAttempts = new Map<CharacterId, DoorOpenAttempt>();
@@ -206,6 +208,7 @@ export class Game {
   ) {
     this.renderer = new PixiGameRenderer(canvas);
     this.controlsPanel = new ControlsPanel(sidePanel);
+    this.controlsPanel.setLevelDescription(this.level.description);
     window.addEventListener("beforeunload", this.dispose);
   }
 
@@ -273,7 +276,7 @@ export class Game {
       this.inputManager = new InputManager(this.canvas, this.camera, {
         onCanvasCommand: (command) => this.handleCanvasCommand(command),
         onCursorMove: (worldPosition) => {
-          if (this.gameOver) {
+          if (this.gameOver || this.levelCompleted) {
             return;
           }
 
@@ -442,7 +445,7 @@ export class Game {
   }
 
   private frame(deltaTime: number): void {
-    if (!this.gameOver) {
+    if (!this.gameOver && !this.levelCompleted) {
       this.update(deltaTime);
     }
     this.render();
@@ -463,13 +466,18 @@ export class Game {
 
     for (const enemy of this.enemies.values()) {
       enemy.update(deltaTime, (position, radius) =>
-        this.isEnemyPositionWalkable(position, radius)
+        this.isEnemyPositionWalkable(position, radius, enemy.id)
       );
     }
     this.updateDrone(deltaTime);
     this.updateTieAttempts();
     this.updateDoorOpenAttempts();
     this.updateDoorAnimations(deltaTime);
+    this.updateLevelCompletion();
+    if (this.levelCompleted) {
+      return;
+    }
+
     this.updateRescueAttempts();
     this.updatePendingDroneShot(deltaTime);
     this.updateEnemyShooting(deltaTime);
@@ -639,7 +647,7 @@ export class Game {
   }
 
   private handleCanvasCommand(command: CanvasCommand): void {
-    if (this.gameOver) {
+    if (this.gameOver || this.levelCompleted) {
       return;
     }
 
@@ -863,7 +871,7 @@ export class Game {
   }
 
   private handleKeyDown(key: string, code: string, repeat: boolean): void {
-    if (this.gameOver) {
+    if (this.gameOver || this.levelCompleted) {
       return;
     }
 
@@ -1685,6 +1693,54 @@ export class Game {
     }
   }
 
+  private updateLevelCompletion(): void {
+    if (this.levelCompleted) {
+      return;
+    }
+
+    const maya = this.characters.get("maya");
+    if (!maya || maya.isBound() || !this.isMapFullyRevealed()) {
+      return;
+    }
+
+    this.completeLevel();
+  }
+
+  private isMapFullyRevealed(): boolean {
+    let hasActiveCloud = false;
+
+    this.forEachActiveCloudSprite(() => {
+      hasActiveCloud = true;
+    });
+
+    return !hasActiveCloud;
+  }
+
+  private completeLevel(): void {
+    if (this.levelCompleted) {
+      return;
+    }
+
+    this.levelCompleted = true;
+    this.droneInput.clear();
+    this.cameraInput.clear();
+    this.enemyShotStates.clear();
+    this.doorOpenAttempts.clear();
+    this.pendingDroneShot = null;
+    this.loop.stop();
+    window.setTimeout(() => this.showLevelCompletePrompt(), 0);
+  }
+
+  private showLevelCompletePrompt(): void {
+    if (this.levelCompletePromptShown) {
+      return;
+    }
+
+    this.levelCompletePromptShown = true;
+    window.alert("well done!");
+    window.location.reload();
+  }
+
   private canStartDoorOpenAttempt(character: Character, object: PlacedLevelObject): boolean {
     const interaction = object.interaction;
 
@@ -2338,7 +2394,11 @@ export class Game {
     return false;
   }
 
-  private isEnemyPositionWalkable(position: WorldPoint, radius: number): boolean {
+  private isEnemyPositionWalkable(
+    position: WorldPoint,
+    radius: number,
+    movingEnemyId: EnemyId | null = null
+  ): boolean {
     if (!isInsideWorld(position, this.level.worldSize, radius)) {
       return false;
     }
@@ -2351,6 +2411,20 @@ export class Game {
 
     for (const polygon of this.getActiveLevelObjectCollisionPolygons()) {
       if (circleIntersectsPolygon(position, radius, polygon)) {
+        return false;
+      }
+    }
+
+    for (const enemy of this.enemies.values()) {
+      if (enemy.id === movingEnemyId || enemy.isDead()) {
+        continue;
+      }
+
+      const minimumDistance = Math.max(
+        radius + GAME_CONFIG.enemyCollisionRadius,
+        GAME_CONFIG.enemy.separationRadius
+      );
+      if (distanceSquared(position, enemy.position) < minimumDistance * minimumDistance) {
         return false;
       }
     }
