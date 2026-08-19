@@ -23,26 +23,41 @@ The list below mirrors `CONTROL_HELP` in `src/game/config.ts`, which is rendered
 | --- | --- |
 | Hover + click enemy | Follow the enemy and tie them if close enough |
 | Left-click hero | Select the hero |
+| Left-click prison gate | Send the selected hero to open it |
 | Left-click terrain | Move the selected hero to that point |
-| X | Maya photographs the artifact up close; Alyosha fires toward the cursor within range |
+| X | Maya photographs the artifact, Alyosha fires, Alek deploys or recalls his drone |
+| Arrow keys | Pan the camera, or move Alek's deployed drone |
 | Shift + left-click | Run to the point |
 | Double left-click | Run to the point |
 | C | Toggle prone/upright stance |
-| 1 | Select Maya |
+| E | Open a nearby gate |
+| 1 | Select Maya after she is freed |
 | 2 | Select Alyosha |
+| 3 | Select Alek |
 | Escape | Stop the current movement |
 | D | Toggle debug information |
 
-WASD and arrow-key direct movement are intentionally not used.
+WASD direct hero movement is intentionally not used. Arrow keys pan the camera unless Alek is selected with a deployed drone, in which case they move the drone and the camera follows it.
 
 ## Project Layout
 
 ```text
 public/assets/characters/
   alyosha_movement_8dir_6frames_v8_tie.png
+  drone_operator_movement_8dir_6frames.png
   enemy_movement_8dir_6frames_v6_bound.png
+  fpv_drone_6frames.png
   maya_movement_8dir_6frames_v11_tie.png
   movement-sprites-manifest-6frames.json
+public/assets/
+  cloud.png
+  Maps/map-1.png
+  objects/
+    military_truck_8dir_6frames.png
+    prison_gate_opening_6frames.png
+    tractor_8dir_6frames.png
+    warehouse.png
+    watchtower.png
 src/game/
   animation/SpriteAnimator.ts
   entities/Character.ts
@@ -71,6 +86,7 @@ Current sprite layout:
 
 - heroes: `6 x 28`; rows `24/25` are the primary special action, row `26` is tie, row `27` is death
 - enemies: `6 x 27`; row `24` is shooting, row `25` is bound, row `26` is death
+- FPV drone: `6 x 2`; row `0` is flight, row `1` is explosion
 
 Idle is not a separate animation. Upright idle renders the first `walk` frame; prone idle renders the first `crawl` frame.
 
@@ -84,7 +100,7 @@ Gameplay uses CSS-pixel coordinates. PixiJS scales the backing resolution by `de
 
 ## Level Definition
 
-The test level lives in `src/game/levels/testLevel.ts` and uses a logical size of `1800 x 1000`. Collision zones are separate data in `collisionPolygons`; visual blocks are in `decorativeObjects`. This keeps future PNG maps as visual layers rather than collision sources.
+The first level lives in `src/game/levels/testLevel.ts`, uses `public/assets/Maps/map-1.png` as the visual map, and renders it as a `2508 x 2508` world. Collision zones are separate data in `collisionPolygons` and `objects[].collisionShapes`. Map pixels are not used as collision data.
 
 `LevelDefinition` already has placeholders for:
 
@@ -93,30 +109,44 @@ The test level lives in `src/game/levels/testLevel.ts` and uses a logical size o
 - `interactionZones`
 - `enemySpawnPoints`
 - `mapImagePath`
+- `objects`
+- `captives`
 
 Collision is not inferred from pixels.
 
 ## Implemented
 
-- Maya and Alyosha load and exist at the same time.
+- Maya, Alyosha, and Alek load and exist at the same time.
 - Left-clicking a hero selects them.
-- Left-clicking terrain assigns a world-coordinate target.
+- Maya starts bound in the right-side prison on level one; she cannot be selected or targeted by enemies until the prison gate opens.
+- Opening the prison gate releases Maya so she can be selected and moved.
+- Buildings and vehicles render as separate map objects and block hero/enemy movement.
+- The prison gate plays its opening sprite animation and removes only its gate collision when open.
+- Nearby gates show an animated open prompt and can be opened with `E` or by left-clicking the gate.
+- Left-clicking terrain assigns a world-coordinate target and uses grid pathfinding to route around blockers.
+- Hero object collision uses the ground/foot point instead of the full sprite body.
 - `Shift + click` and double-click assign run movement.
 - `C` toggles `upright/prone`; prone movement uses crawl.
 - `Escape` stops the current movement.
-- `X` triggers the selected hero special action: Maya photographs the artifact only up close, Alyosha shoots toward the cursor within range.
+- `X` triggers the selected hero special action: Maya photographs the artifact only up close, Alyosha shoots toward the cursor within range, and Alek deploys or recalls his drone.
+- Arrow keys pan the camera without moving a hero; Alek's deployed drone uses the same keys and pulls the camera with it.
+- Soft cloud sprites obscure world content until Alek scans them with the drone.
+- The drone clears cloud sprites persistently with the same radius as enemy vision range.
+- Active cloud sprites block hero movement until the drone clears them.
+- Level one has multiple drone-reveal cloud zones across the central road, prison approach, and southeast field.
+- Level one has six enemy patrols spread across the route and prison approach.
+- Enemies raise the alarm as soon as the drone enters their vision cone, then shoot it after a short delay; one hit destroys it and plays the explosion row.
+- The game ends when any hero dies and offers a retry prompt.
 - Maya gets a temporary `X` prompt when she is near the artifact.
 - Heroes and enemies have 100 health; kalashnikov shots deal 50 damage.
 - Enemies can rescue bound allies, raise the alarm, investigate gunshots, search a wider route, and return to patrol.
 - Movement uses delta time and eight directions via `Math.atan2()`.
-- Collision uses ground points and body/radius checks.
+- Collision uses ground points, foot radii, object collision shapes, and active cloud zones.
 - Invalid clicks show a short red marker and do not start movement.
-- The camera follows the selected hero and stays inside the level bounds.
+- The camera can free-pan, follow the selected hero, or follow the active drone while staying inside level bounds.
 - Rendering uses Y-sorting for objects, enemies, the artifact, and heroes.
 - Debug mode shows collision polygons, ground points, target lines, cursor world coordinates, frame index, and visible bounds.
 
 ## Next Phases
 
-- Pathfinding around collision polygons without changing the public target/path model in `Character`.
-- PNG map rendering as a visual layer separated from collision and gameplay zones.
 - Cover and interaction zones.

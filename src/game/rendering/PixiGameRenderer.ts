@@ -8,6 +8,7 @@ const LAYER_KEYS = [
   "sorted",
   "effects",
   "prompts",
+  "clouds",
   "debug"
 ] as const;
 

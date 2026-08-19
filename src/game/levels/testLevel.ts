@@ -1,52 +1,295 @@
 import type { LevelDefinition } from "./LevelDefinition";
 
 export const testLevel: LevelDefinition = {
-  id: "test-yard",
-  name: "Test Yard",
+  id: "level-one",
+  name: "Level One",
   worldSize: {
-    width: 1800,
-    height: 1000
+    width: 2508,
+    height: 2508
   },
+  mapImagePath: "/assets/Maps/map-1.png",
   initialPositions: {
-    maya: { x: 260, y: 410 },
-    alyosha: { x: 360, y: 520 }
+    maya: { x: 2165, y: 360 },
+    alyosha: { x: 155, y: 2355 },
+    alek: { x: 220, y: 2405 }
   },
   collisionPolygons: [],
   decorativeObjects: [],
   walkableZones: [],
   coverZones: [],
   interactionZones: [],
-  enemySpawnPoints: [],
-  enemyPatrols: [
+  objects: [
     {
-      id: "enemy-1",
-      name: "Patrol 1",
-      route: [
-        { x: 540, y: 360 },
-        { x: 1180, y: 360 }
-      ],
-      alarmRoute: [
-        { x: 430, y: 270 },
-        { x: 1410, y: 285 },
-        { x: 1520, y: 640 },
-        { x: 940, y: 835 },
-        { x: 350, y: 670 }
+      id: "warehouse-north-yard",
+      label: "Warehouse",
+      kind: "building",
+      imagePath: "/assets/objects/warehouse.png",
+      position: { x: 1350, y: 1125 },
+      scale: 0.76,
+      collisionShapes: [
+        {
+          id: "warehouse-footprint",
+          points: [
+            { x: -225, y: -105 },
+            { x: -25, y: -220 },
+            { x: 225, y: -95 },
+            { x: 35, y: 45 },
+            { x: -190, y: -35 }
+          ]
+        }
       ]
     },
     {
-      id: "enemy-2",
-      name: "Patrol 2",
-      route: [
-        { x: 1180, y: 450 },
-        { x: 540, y: 450 }
+      id: "watchtower-prison-road",
+      label: "Watchtower",
+      kind: "building",
+      imagePath: "/assets/objects/watchtower.png",
+      position: { x: 2290, y: 835 },
+      scale: 0.55,
+      collisionShapes: [
+        {
+          id: "watchtower-posts",
+          points: [
+            { x: -55, y: -88 },
+            { x: 48, y: -88 },
+            { x: 64, y: -18 },
+            { x: 38, y: 24 },
+            { x: -42, y: 24 },
+            { x: -64, y: -18 }
+          ]
+        }
+      ]
+    },
+    {
+      id: "prison-compound",
+      label: "Prison Compound",
+      kind: "gate",
+      imagePath: "/assets/objects/prison_gate_opening_6frames.png",
+      position: { x: 2160, y: 590 },
+      scale: 0.82,
+      sortY: 315,
+      frame: {
+        columns: 6,
+        rows: 1,
+        column: 0,
+        row: 0
+      },
+      collisionShapes: [
+        {
+          id: "prison-back-wall",
+          points: [
+            { x: -220, y: -280 },
+            { x: 35, y: -420 },
+            { x: 260, y: -295 },
+            { x: 238, y: -258 },
+            { x: 35, y: -378 },
+            { x: -195, y: -248 }
+          ]
+        },
+        {
+          id: "prison-left-wall",
+          points: [
+            { x: -260, y: -245 },
+            { x: -220, y: -280 },
+            { x: -198, y: -142 },
+            { x: -240, y: -112 }
+          ]
+        },
+        {
+          id: "prison-right-wall",
+          points: [
+            { x: 238, y: -258 },
+            { x: 262, y: -290 },
+            { x: 126, y: -30 },
+            { x: 92, y: -50 }
+          ]
+        },
+        {
+          id: "prison-front-left-wall",
+          points: [
+            { x: -240, y: -112 },
+            { x: -198, y: -142 },
+            { x: -122, y: -102 },
+            { x: -152, y: -70 }
+          ]
+        },
+        {
+          id: "prison-front-right-wall",
+          points: [
+            { x: -34, y: -72 },
+            { x: 92, y: -50 },
+            { x: 126, y: -30 },
+            { x: -18, y: -40 }
+          ]
+        },
+        {
+          id: "prison-gate-closed",
+          disabledWhenOpen: true,
+          points: [
+            { x: -152, y: -70 },
+            { x: -122, y: -102 },
+            { x: -34, y: -72 },
+            { x: -18, y: -40 },
+            { x: -76, y: -27 }
+          ]
+        }
       ],
-      alarmRoute: [
-        { x: 1380, y: 570 },
-        { x: 860, y: 820 },
-        { x: 320, y: 620 },
-        { x: 460, y: 260 },
-        { x: 1360, y: 305 }
+      entryZones: [
+        {
+          id: "front-gate-entry",
+          points: [
+            { x: -150, y: -72 },
+            { x: -118, y: -106 },
+            { x: -30, y: -74 },
+            { x: -18, y: -36 },
+            { x: -84, y: -16 }
+          ]
+        }
+      ],
+      interaction: {
+        type: "open-door",
+        point: { x: -95, y: 75 },
+        range: 125,
+        promptOffset: { x: 13, y: -205 },
+        releaseCaptiveIds: ["maya"],
+        fps: 8,
+        oneShot: true
+      }
+    },
+    {
+      id: "military-truck-north",
+      label: "Military Truck",
+      kind: "vehicle",
+      imagePath: "/assets/objects/military_truck_8dir_6frames.png",
+      randomPositions: [
+        { x: 720, y: 570 },
+        { x: 1020, y: 1520 },
+        { x: 575, y: 1765 }
+      ],
+      scale: 0.58,
+      frame: {
+        columns: 6,
+        rows: 8,
+        column: 0,
+        row: 5
+      },
+      collisionShapes: [
+        {
+          id: "truck-body",
+          points: [
+            { x: -105, y: -68 },
+            { x: 84, y: -68 },
+            { x: 118, y: -30 },
+            { x: 104, y: 12 },
+            { x: -82, y: 22 },
+            { x: -122, y: -20 }
+          ]
+        }
+      ]
+    },
+    {
+      id: "military-truck-supply",
+      label: "Military Truck",
+      kind: "vehicle",
+      imagePath: "/assets/objects/military_truck_8dir_6frames.png",
+      randomPositions: [
+        { x: 1685, y: 640 },
+        { x: 1880, y: 1535 },
+        { x: 1160, y: 2030 }
+      ],
+      scale: 0.58,
+      frame: {
+        columns: 6,
+        rows: 8,
+        column: 0,
+        row: 6
+      },
+      collisionShapes: [
+        {
+          id: "truck-body",
+          points: [
+            { x: -110, y: -74 },
+            { x: 88, y: -70 },
+            { x: 120, y: -28 },
+            { x: 98, y: 18 },
+            { x: -88, y: 22 },
+            { x: -124, y: -26 }
+          ]
+        }
+      ]
+    },
+    {
+      id: "tractor-field",
+      label: "Tractor",
+      kind: "vehicle",
+      imagePath: "/assets/objects/tractor_8dir_6frames.png",
+      randomPositions: [
+        { x: 1585, y: 1840 },
+        { x: 1960, y: 2075 },
+        { x: 1080, y: 760 }
+      ],
+      scale: 0.56,
+      frame: {
+        columns: 6,
+        rows: 8,
+        column: 0,
+        row: 5
+      },
+      collisionShapes: [
+        {
+          id: "tractor-body",
+          points: [
+            { x: -72, y: -60 },
+            { x: 62, y: -62 },
+            { x: 92, y: -24 },
+            { x: 72, y: 18 },
+            { x: -72, y: 20 },
+            { x: -94, y: -22 }
+          ]
+        }
       ]
     }
-  ]
+  ],
+  cloudZones: [
+    {
+      id: "central-road-fog",
+      points: [
+        { x: 470, y: 760 },
+        { x: 1355, y: 700 },
+        { x: 1510, y: 1325 },
+        { x: 870, y: 1585 },
+        { x: 420, y: 1320 }
+      ]
+    },
+    {
+      id: "prison-approach-fog",
+      points: [
+        { x: 1560, y: 705 },
+        { x: 2075, y: 670 },
+        { x: 2390, y: 930 },
+        { x: 2205, y: 1265 },
+        { x: 1640, y: 1135 }
+      ]
+    },
+    {
+      id: "south-east-field-fog",
+      points: [
+        { x: 1320, y: 1480 },
+        { x: 2460, y: 1435 },
+        { x: 2490, y: 2360 },
+        { x: 1590, y: 2450 },
+        { x: 1215, y: 2015 }
+      ]
+    }
+  ],
+  captives: [
+    {
+      characterId: "maya",
+      rescuerIds: ["alyosha", "alek"],
+      position: { x: 2165, y: 360 },
+      rescueRange: 42
+    }
+  ],
+  enemySpawnPoints: [],
+  enemyPatrols: []
 };

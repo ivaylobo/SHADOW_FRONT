@@ -102,6 +102,19 @@
       "death": {
         "row": 27
       }
+    },
+    "alek": {
+      "file": "drone_operator_movement_8dir_6frames.png",
+      "sha256": "652dc572d85ec52e1b2b470c2fde08d6fa183f95e90d9565997b028d51c12190",
+      "rows": 28,
+      "sheetWidth": 327,
+      "sheetHeight": 2048,
+      "specialRows": {
+        "tie": 26
+      },
+      "death": {
+        "row": 27
+      }
     }
   }
 }

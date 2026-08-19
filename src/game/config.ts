@@ -20,8 +20,15 @@ export const GAME_CONFIG = {
   characterBodyCollisionTopRatio: 0.76,
   characterBodyCollisionBottomRatio: 0.32,
   characterBodyFootInset: 7,
+  characterFootCollisionRadius: 8,
   enemyCollisionRadius: 15,
   cameraFollowSharpness: 7,
+  cameraPanSpeed: 520,
+  pathfinding: {
+    cellSize: 72,
+    sampleSpacing: 18,
+    maxNodes: 1800
+  },
   movementSpeeds: {
     walk: 90,
     run: 155,
@@ -66,6 +73,44 @@ export const GAME_CONFIG = {
     hitRadius: 42,
     rescueRange: 34,
     alarmDuration: 2.8
+  },
+  drone: {
+    sprite: {
+      file: "fpv_drone_6frames.png",
+      columns: 6,
+      rows: 2,
+      sheetWidth: 768,
+      sheetHeight: 256,
+      flightRow: 0,
+      explosionRow: 1
+    },
+    renderScale: 0.58,
+    speed: 245,
+    fps: 12,
+    explosionFps: 14,
+    enemyShotDelay: 0.5,
+    recallRange: 140,
+    edgePadding: 34,
+    spawnOffset: {
+      x: 46,
+      y: -62
+    }
+  },
+  cloud: {
+    sprite: {
+      file: "/assets/cloud.png"
+    },
+    alpha: 0.7,
+    tileWidth: 420,
+    tileSpacingX: 330,
+    tileSpacingY: 190,
+    jitterX: 72,
+    jitterY: 38,
+    scaleJitter: 0.16,
+    collisionWidthRatio: 0.78,
+    collisionHeightRatio: 0.58,
+    backgroundCutoff: 10,
+    revealSampleSpacing: 120
   },
   tie: {
     walkSpeed: 86,
@@ -143,12 +188,20 @@ export const CONTROL_HELP: ControlHelpItem[] = [
     description: "Select the hero"
   },
   {
+    command: "Left-click prison gate",
+    description: "Send the selected hero to open it"
+  },
+  {
     command: "Left-click terrain",
     description: "Move the selected hero to that point"
   },
   {
     command: "X",
-    description: "Maya photographs the artifact up close; Alyosha fires toward the cursor within range"
+    description: "Maya photographs the artifact, Alyosha fires, Alek deploys or recalls his drone"
+  },
+  {
+    command: "Arrow keys",
+    description: "Pan the camera, or move Alek's deployed drone"
   },
   {
     command: "Shift + left-click",
@@ -163,12 +216,20 @@ export const CONTROL_HELP: ControlHelpItem[] = [
     description: "Toggle prone/upright stance"
   },
   {
+    command: "E",
+    description: "Open a nearby gate"
+  },
+  {
     command: "1",
-    description: "Select Maya"
+    description: "Select Maya after she is freed"
   },
   {
     command: "2",
     description: "Select Alyosha"
+  },
+  {
+    command: "3",
+    description: "Select Alek"
   },
   {
     command: "Escape",

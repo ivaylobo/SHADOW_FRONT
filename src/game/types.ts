@@ -3,9 +3,9 @@ export interface WorldPoint {
   y: number;
 }
 
-export type CharacterId = "maya" | "alyosha";
+export type CharacterId = "maya" | "alyosha" | "alek";
 
-export type EnemyId = "enemy-1" | "enemy-2";
+export type EnemyId = `enemy-${number}`;
 
 export type Direction =
   | "left"
@@ -38,6 +38,7 @@ export interface CharacterState {
   targetPosition: WorldPoint | null;
   health: number;
   dead: boolean;
+  bound: boolean;
   selected: boolean;
   stance: Stance;
   motion: Motion;
@@ -63,13 +64,14 @@ export interface MovementSpriteManifest {
   rowFormula: string;
   rowOrder: string[];
   specialRows?: Partial<Record<SpecialAction, number>>;
-  specialActions?: Record<CharacterId, { name: string; row: number; proneRow?: number }>;
+  specialActions?: Partial<Record<CharacterId, { name: string; row: number; proneRow?: number }>>;
   files: Record<
     CharacterId,
     {
       file: string;
       sha256: string;
       rows?: number;
+      sheetWidth?: number;
       sheetHeight?: number;
       specialRows?: Partial<Record<SpecialAction, number | { upright: number; prone: number }>>;
       death?: SpriteRowReference;

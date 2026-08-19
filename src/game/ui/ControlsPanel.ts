@@ -34,7 +34,9 @@ export class ControlsPanel {
   updateStatus(status: PanelStatus): void {
     this.selectedName.textContent = status.name;
     this.selectedStance.textContent = status.state.stance;
-    this.selectedMotion.textContent = status.state.action ?? status.state.motion;
+    this.selectedMotion.textContent = status.state.bound
+      ? "bound"
+      : status.state.action ?? status.state.motion;
     this.selectedHealth.textContent = `${status.state.health}`;
     this.selectedTarget.textContent = status.state.targetPosition ? "active" : "none";
   }

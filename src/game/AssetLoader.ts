@@ -5,13 +5,24 @@ export interface LoadedCharacterAssets {
   manifest: MovementSpriteManifest;
   images: Record<CharacterId, HTMLImageElement>;
   enemyImage: HTMLImageElement;
+  droneImage: HTMLImageElement;
+  cloudImage: HTMLImageElement | null;
+  mapImage: HTMLImageElement | null;
+  objectImages: Record<string, HTMLImageElement>;
+}
+
+export interface LoadCharacterAssetsOptions {
+  mapImagePath?: string;
+  objectImagePaths?: string[];
 }
 
 export class AssetLoader {
   private manifestPromise: Promise<MovementSpriteManifest> | null = null;
   private imagePromises = new Map<string, Promise<HTMLImageElement>>();
 
-  async loadCharacterAssets(): Promise<LoadedCharacterAssets> {
+  async loadCharacterAssets(
+    options: LoadCharacterAssetsOptions = {}
+  ): Promise<LoadedCharacterAssets> {
     const manifest = await this.loadManifest();
     const entries = Object.entries(manifest.files) as [
       CharacterId,
@@ -24,13 +35,30 @@ export class AssetLoader {
       })
     );
 
+    const objectImagePaths = [...new Set(options.objectImagePaths ?? [])];
+    const objectImageEntries = await Promise.all(
+      objectImagePaths.map(async (path) => {
+        const image = await this.loadImage(`object:${path}`, path);
+        return [path, image] as const;
+      })
+    );
+
     return {
       manifest,
       images: Object.fromEntries(imageEntries) as Record<CharacterId, HTMLImageElement>,
       enemyImage: await this.loadImage(
         "enemy",
         `${ASSET_BASE_PATH}${GAME_CONFIG.enemy.sprite.file}`
-      )
+      ),
+      droneImage: await this.loadImage(
+        "drone",
+        `${ASSET_BASE_PATH}${GAME_CONFIG.drone.sprite.file}`
+      ),
+      cloudImage: await this.loadOptionalImage("cloud", GAME_CONFIG.cloud.sprite.file),
+      mapImage: options.mapImagePath
+        ? await this.loadOptionalImage(`map:${options.mapImagePath}`, options.mapImagePath)
+        : null,
+      objectImages: Object.fromEntries(objectImageEntries)
     };
   }
 
@@ -63,5 +91,21 @@ export class AssetLoader {
 
     this.imagePromises.set(cacheKey, promise);
     return promise;
+  }
+
+  private async loadOptionalImage(
+    cacheKey: string,
+    path: string
+  ): Promise<HTMLImageElement | null> {
+    try {
+      return await this.loadImage(cacheKey, path);
+    } catch (error) {
+      console.warn("Optional image not loaded.", {
+        cacheKey,
+        path,
+        error
+      });
+      return null;
+    }
   }
 }

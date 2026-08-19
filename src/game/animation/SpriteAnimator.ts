@@ -18,6 +18,12 @@ export interface SourceRect {
   flipX: boolean;
 }
 
+interface SpriteMetrics {
+  rows: number;
+  frameWidth: number;
+  frameHeight: number;
+}
+
 export class SpriteAnimator {
   constructor(private manifest: MovementSpriteManifest) {}
 
@@ -40,10 +46,12 @@ export class SpriteAnimator {
   }
 
   getSourceRect(
+    characterId: CharacterId,
     motion: MovingMotion,
     direction: CharacterState["direction"],
     frameIndex: number
   ): SourceRect {
+    const metrics = this.getSpriteMetrics(characterId);
     const motionOverrides = GAME_CONFIG.spriteMotionRowOverrides[motion] as Partial<
       Record<CharacterState["direction"], SpriteRowRule>
     >;
@@ -58,10 +66,10 @@ export class SpriteAnimator {
     const row = motionIndex * this.manifest.directions.length + rowRule.rowOffset;
 
     return {
-      x: frameIndex * this.manifest.frameWidth,
-      y: row * this.manifest.frameHeight,
-      width: this.manifest.frameWidth,
-      height: this.manifest.frameHeight,
+      x: frameIndex * metrics.frameWidth,
+      y: row * metrics.frameHeight,
+      width: metrics.frameWidth,
+      height: metrics.frameHeight,
       flipX: rowRule.flipX
     };
   }
@@ -73,19 +81,18 @@ export class SpriteAnimator {
     direction: Direction,
     frameIndex: number
   ): SourceRect {
-    const fileInfo = this.manifest.files[characterId];
-    const rowCount = fileInfo.rows ?? this.manifest.rows;
-    const row = this.resolveSpecialRow(characterId, action, stance, rowCount);
+    const metrics = this.getSpriteMetrics(characterId);
+    const row = this.resolveSpecialRow(characterId, action, stance, metrics.rows);
 
-    if (row < 0 || row >= rowCount) {
+    if (row < 0 || row >= metrics.rows) {
       throw new Error(`Invalid sprite special action row: ${action} -> ${row}`);
     }
 
     return {
-      x: frameIndex * this.manifest.frameWidth,
-      y: row * this.manifest.frameHeight,
-      width: this.manifest.frameWidth,
-      height: this.manifest.frameHeight,
+      x: frameIndex * metrics.frameWidth,
+      y: row * metrics.frameHeight,
+      width: metrics.frameWidth,
+      height: metrics.frameHeight,
       flipX: this.shouldFlipSpecialAction(direction)
     };
   }
@@ -96,12 +103,12 @@ export class SpriteAnimator {
     frameIndex: number
   ): SourceRect | null {
     const fileInfo = this.manifest.files[characterId];
-    const rowCount = fileInfo.rows ?? this.manifest.rows;
+    const metrics = this.getSpriteMetrics(characterId);
     const death = this.normalizeRowReference(
       fileInfo.death ?? this.manifest.deathRows?.[characterId]
-    ) ?? { row: rowCount - 1 };
+    ) ?? { row: metrics.rows - 1 };
 
-    if (death.row < 0 || death.row >= rowCount) {
+    if (death.row < 0 || death.row >= metrics.rows) {
       return null;
     }
 
@@ -111,18 +118,20 @@ export class SpriteAnimator {
     );
 
     return {
-      x: resolvedFrameIndex * this.manifest.frameWidth,
-      y: death.row * this.manifest.frameHeight,
-      width: this.manifest.frameWidth,
-      height: this.manifest.frameHeight,
+      x: resolvedFrameIndex * metrics.frameWidth,
+      y: death.row * metrics.frameHeight,
+      width: metrics.frameWidth,
+      height: metrics.frameHeight,
       flipX: death.flipX ?? this.shouldFlipSpecialAction(direction)
     };
   }
 
-  getRenderSize(): { width: number; height: number } {
+  getRenderSize(characterId: CharacterId): { width: number; height: number } {
+    const metrics = this.getSpriteMetrics(characterId);
+
     return {
-      width: this.manifest.frameWidth * GAME_CONFIG.renderScale,
-      height: this.manifest.frameHeight * GAME_CONFIG.renderScale
+      width: metrics.frameWidth * GAME_CONFIG.renderScale,
+      height: metrics.frameHeight * GAME_CONFIG.renderScale
     };
   }
 
@@ -146,6 +155,19 @@ export class SpriteAnimator {
     }
 
     return typeof reference === "number" ? { row: reference } : reference;
+  }
+
+  private getSpriteMetrics(characterId: CharacterId): SpriteMetrics {
+    const fileInfo = this.manifest.files[characterId];
+    const rows = fileInfo.rows ?? this.manifest.rows;
+    const sheetWidth = fileInfo.sheetWidth ?? this.manifest.sheetWidth;
+    const sheetHeight = fileInfo.sheetHeight ?? this.manifest.sheetHeight;
+
+    return {
+      rows,
+      frameWidth: sheetWidth / this.manifest.columns,
+      frameHeight: sheetHeight / rows
+    };
   }
 
   private resolveSpecialRow(
