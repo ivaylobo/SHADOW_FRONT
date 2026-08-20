@@ -8,9 +8,10 @@ export const testLevel: LevelDefinition = {
     paragraphs: [
       "Reveal the map with Alek. Select Alek with key 3, press X to deploy the drone, and move the drone with the arrow keys. While Alek is selected and the drone is active, the camera follows the drone and hidden zones are revealed as the drone passes over them. If the drone is not active or Alek is not selected, the arrow keys only move the camera.",
       "Clear the needed hidden zones to create a route the heroes can actually walk through. Heroes cannot pass under cloud cover; any cloud blocking the route must be revealed before they can move through it.",
-      "After the needed route is revealed, send Alyosha or Alek to the prison gate. Open it with E when the hero is close enough, or left-click the gate itself."
+      "After the needed route is revealed, send Alyosha or Alek to the prison gate. Open it with E when the hero is close enough, or left-click the gate itself.",
+      "Once Maya is free, bring Maya, Alyosha, and Alek back to the starting tractor. Board all three heroes into the tractor to begin the escape."
     ],
-    completion: "The level is complete when the needed drone-reveal zones are cleared to create a passable route and Maya has been freed by opening the gate."
+    completion: "The level is complete after Maya is freed, all three heroes return to the starting tractor, and the tractor tows the MT-LB out of view."
   },
   worldSize: {
     width: 2508,
@@ -157,9 +158,9 @@ export const testLevel: LevelDefinition = {
       ],
       interaction: {
         type: "open-door",
-        point: { x: -95, y: 75 },
-        range: 125,
-        promptOffset: { x: 13, y: -205 },
+        point: { x: -78, y: 22 },
+        range: 140,
+        promptOffset: { x: -4, y: -170 },
         releaseCaptiveIds: ["maya"],
         fps: 8,
         oneShot: true
@@ -201,28 +202,28 @@ export const testLevel: LevelDefinition = {
       }
     },
     {
-      id: "military-truck-start",
-      label: "Military Truck",
+      id: "mt-lb-start",
+      label: "MT-LB",
       kind: "vehicle",
-      imagePath: "/assets/objects/military_truck_8dir_6frames.png",
-      position: { x: 455, y: 2240 },
-      scale: 0.58,
+      imagePath: "/assets/objects/MT-LB.png",
+      position: { x: 590, y: 2315 },
+      scale: 0.94,
       frame: {
         columns: 6,
         rows: 8,
         column: 0,
-        row: 6
+        row: 7
       },
       collisionShapes: [
         {
-          id: "truck-body",
+          id: "mt-lb-body",
           points: [
-            { x: -110, y: -74 },
-            { x: 88, y: -70 },
-            { x: 120, y: -28 },
-            { x: 98, y: 18 },
-            { x: -88, y: 22 },
-            { x: -124, y: -26 }
+            { x: -98, y: -52 },
+            { x: 82, y: -52 },
+            { x: 112, y: -18 },
+            { x: 92, y: 24 },
+            { x: -92, y: 24 },
+            { x: -116, y: -16 }
           ]
         }
       ]
@@ -391,34 +392,18 @@ export const testLevel: LevelDefinition = {
       id: "enemy-3",
       name: "Prison Road Patrol",
       route: [
-        { x: 1900, y: 735 },
-        { x: 2145, y: 780 },
-        { x: 2375, y: 670 },
-        { x: 2325, y: 935 },
-        { x: 2030, y: 930 }
+        { x: 1980, y: 905 },
+        { x: 2265, y: 895 },
+        { x: 2410, y: 1085 },
+        { x: 2145, y: 1210 },
+        { x: 1865, y: 1035 }
       ],
       alarmRoute: [
-        { x: 1810, y: 610 },
-        { x: 2170, y: 650 },
-        { x: 2430, y: 835 },
-        { x: 2160, y: 1130 },
-        { x: 1765, y: 930 }
-      ]
-    },
-    {
-      id: "enemy-4",
-      name: "North Approach Patrol",
-      route: [
-        { x: 1600, y: 500 },
-        { x: 1770, y: 360 },
-        { x: 1890, y: 620 },
-        { x: 1675, y: 720 }
-      ],
-      alarmRoute: [
-        { x: 1470, y: 435 },
-        { x: 1760, y: 260 },
-        { x: 1975, y: 650 },
-        { x: 1570, y: 805 }
+        { x: 1840, y: 810 },
+        { x: 2240, y: 800 },
+        { x: 2440, y: 1045 },
+        { x: 2140, y: 1260 },
+        { x: 1765, y: 1040 }
       ]
     },
     {

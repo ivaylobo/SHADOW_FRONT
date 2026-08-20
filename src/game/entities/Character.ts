@@ -138,6 +138,15 @@ export class Character {
     this.actionElapsed = 0;
   }
 
+  takePhoto(targetPosition: WorldPoint): boolean {
+    if (this.id !== "maya" || this.state.dead || this.state.bound) {
+      return false;
+    }
+
+    this.startSpecialAction("photo", targetPosition);
+    return true;
+  }
+
   hasActiveWork(): boolean {
     return (
       (this.state.dead && this.state.frameIndex < this.animator.getFrameCount() - 1) ||

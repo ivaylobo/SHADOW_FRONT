@@ -65,10 +65,6 @@ type RenderItem =
     }
   | {
       sortY: number;
-      kind: "photo";
-    }
-  | {
-      sortY: number;
       kind: "drone";
       drone: Drone;
     }
@@ -81,12 +77,6 @@ type RenderItem =
 interface ShotTrace {
   from: WorldPoint;
   to: WorldPoint;
-  age: number;
-  duration: number;
-}
-
-interface PhotoFlash {
-  position: WorldPoint;
   age: number;
   duration: number;
 }
@@ -144,6 +134,18 @@ interface PlacedLevelObject extends LevelObjectDefinition {
 
 type LevelObjectInteractionType = NonNullable<LevelObjectDefinition["interaction"]>["type"];
 type VehiclePromptMode = "mount" | "dismount";
+type MissionPhase = "free-maya" | "return-to-tractor" | "escaping";
+
+interface EscapeSequence {
+  elapsed: number;
+}
+
+const START_TRACTOR_ID = "tractor-start";
+const START_TOWED_VEHICLE_ID = "mt-lb-start";
+const ESCAPE_CHARACTER_IDS: CharacterId[] = ["maya", "alyosha", "alek"];
+const ESCAPE_DIRECTION: WorldPoint = { x: -0.86, y: 0.5 };
+const ESCAPE_SPEED = 175;
+const ESCAPE_ANIMATION_FPS = 10;
 
 interface PathCell {
   x: number;
@@ -172,11 +174,6 @@ export class Game {
   private readonly renderItems: RenderItem[] = [];
   private readonly droneInput = new Set<string>();
   private readonly cameraInput = new Set<string>();
-  private readonly photoArtifact = {
-    position: { x: 880, y: 715 },
-    radius: 26,
-    interactionRange: GAME_CONFIG.specialActions.photo.range
-  };
 
   private inputManager: InputManager | null = null;
   private resizeObserver: ResizeObserver | null = null;
@@ -192,7 +189,6 @@ export class Game {
   private cursorWorld: WorldPoint | null = null;
   private markers: Marker[] = [];
   private shotTraces: ShotTrace[] = [];
-  private photoFlashes: PhotoFlash[] = [];
   private cloudReveals: WorldPoint[] = [];
   private lastCloudRevealPosition: WorldPoint | null = null;
   private alarmFlash: AlarmFlash | null = null;
@@ -201,6 +197,8 @@ export class Game {
   private gameOverPromptShown = false;
   private levelCompleted = false;
   private levelCompletePromptShown = false;
+  private missionPhase: MissionPhase = "free-maya";
+  private escapeSequence: EscapeSequence | null = null;
   private elapsedTime = 0;
   private readonly tieAttempts = new Map<CharacterId, TieAttempt>();
   private readonly doorOpenAttempts = new Map<CharacterId, DoorOpenAttempt>();
@@ -268,17 +266,19 @@ export class Game {
           animator
         })
       );
-      for (const patrol of this.level.enemyPatrols) {
-        this.enemies.set(
-          patrol.id,
-          new Enemy({
-            id: patrol.id,
-            name: patrol.name,
-            image: assets.enemyImage,
-            route: patrol.route,
-            alarmRoute: patrol.alarmRoute
-          })
-        );
+      if (!GAME_CONFIG.devMode.disableEnemies) {
+        for (const patrol of this.level.enemyPatrols) {
+          this.enemies.set(
+            patrol.id,
+            new Enemy({
+              id: patrol.id,
+              name: patrol.name,
+              image: assets.enemyImage,
+              route: patrol.route,
+              alarmRoute: patrol.alarmRoute
+            })
+          );
+        }
       }
 
       this.applyLevelCaptives();
@@ -286,7 +286,7 @@ export class Game {
       this.inputManager = new InputManager(this.canvas, this.camera, {
         onCanvasCommand: (command) => this.handleCanvasCommand(command),
         onCursorMove: (worldPosition) => {
-          if (this.gameOver || this.levelCompleted) {
+          if (this.gameOver || this.levelCompleted || this.missionPhase === "escaping") {
             return;
           }
 
@@ -466,6 +466,20 @@ export class Game {
 
   private update(deltaTime: number): void {
     this.elapsedTime += deltaTime;
+
+    if (this.missionPhase === "escaping") {
+      this.updateEscapeSequence(deltaTime);
+      this.updateTimedEffects(this.markers, deltaTime);
+      this.updateTimedEffects(this.shotTraces, deltaTime);
+      const selectedCharacter = this.getSelectedCharacter();
+      this.controlsPanel.updateStatus({
+        name: selectedCharacter.name,
+        state: selectedCharacter.state
+      });
+      this.controlsPanel.setDebug(this.debugEnabled, this.buildDebugReadout(selectedCharacter));
+      return;
+    }
+
     this.syncTieAttemptTargets();
     this.syncDoorOpenAttemptTargets();
     this.syncVehicleBoardAttemptTargets();
@@ -488,8 +502,8 @@ export class Game {
     this.updateDoorOpenAttempts();
     this.updateVehicleBoardAttempts();
     this.updateDoorAnimations(deltaTime);
-    this.updateLevelCompletion();
-    if (this.levelCompleted) {
+    this.updateMissionObjective();
+    if (this.levelCompleted || this.isEscapeSequenceActive()) {
       return;
     }
 
@@ -502,7 +516,6 @@ export class Game {
 
     this.updateTimedEffects(this.markers, deltaTime);
     this.updateTimedEffects(this.shotTraces, deltaTime);
-    this.updateTimedEffects(this.photoFlashes, deltaTime);
     if (this.alarmFlash) {
       this.alarmFlash.age += deltaTime;
       if (this.alarmFlash.age >= this.alarmFlash.duration) {
@@ -649,7 +662,6 @@ export class Game {
     this.drawTiePrompts();
     this.drawDoorOpenPrompts();
     this.drawVehiclePrompts();
-    this.drawMayaPhotoPrompt();
     this.drawCloudZones();
 
     if (this.debugEnabled) {
@@ -664,7 +676,7 @@ export class Game {
   }
 
   private handleCanvasCommand(command: CanvasCommand): void {
-    if (this.gameOver || this.levelCompleted) {
+    if (this.gameOver || this.levelCompleted || this.missionPhase === "escaping") {
       return;
     }
 
@@ -796,17 +808,7 @@ export class Game {
     }
 
     if (character.id === "maya") {
-      if (!this.isMayaNearPhotoArtifact()) {
-        this.addMarker(this.photoArtifact.position, "invalid");
-        return;
-      }
-
-      character.startSpecialAction("photo", this.photoArtifact.position);
-      this.photoFlashes.push({
-        position: { ...this.photoArtifact.position },
-        age: 0,
-        duration: GAME_CONFIG.specialActions.photo.duration
-      });
+      this.addMarker(character.state.position, "invalid");
       return;
     }
 
@@ -917,7 +919,7 @@ export class Game {
   }
 
   private handleKeyDown(key: string, code: string, repeat: boolean): void {
-    if (this.gameOver || this.levelCompleted) {
+    if (this.gameOver || this.levelCompleted || this.missionPhase === "escaping") {
       return;
     }
 
@@ -1114,7 +1116,7 @@ export class Game {
       if (
         !object.interaction ||
         (interactionType && object.interaction.type !== interactionType) ||
-        !this.containsLevelObjectPoint(object, point)
+        !this.containsInteractiveLevelObjectPoint(object, point)
       ) {
         continue;
       }
@@ -1142,6 +1144,28 @@ export class Game {
       point.y >= top &&
       point.y <= top + size.height
     );
+  }
+
+  private containsInteractiveLevelObjectPoint(
+    object: PlacedLevelObject,
+    point: WorldPoint
+  ): boolean {
+    if (this.containsLevelObjectPoint(object, point)) {
+      return true;
+    }
+
+    const interaction = object.interaction;
+    if (!interaction) {
+      return false;
+    }
+
+    const interactionPoint =
+      interaction.type === "open-door"
+        ? this.getDoorInteractionPoint(object)
+        : this.getVehicleInteractionPoint(object);
+    const radius = Math.min(interaction.range, 86);
+
+    return distanceSquared(point, interactionPoint) <= radius * radius;
   }
 
   private getLevelObjectRenderSize(object: PlacedLevelObject): Size {
@@ -2059,27 +2083,165 @@ export class Game {
     }
   }
 
-  private updateLevelCompletion(): void {
-    if (this.levelCompleted) {
+  private updateMissionObjective(): void {
+    if (this.levelCompleted || this.missionPhase === "escaping") {
       return;
     }
 
     const maya = this.characters.get("maya");
-    if (!maya || maya.isBound() || !this.isMapFullyRevealed()) {
+    if (!maya || maya.isBound()) {
       return;
     }
 
-    this.completeLevel();
+    if (this.missionPhase === "free-maya") {
+      this.startReturnToTractorObjective();
+      return;
+    }
+
+    if (this.missionPhase === "return-to-tractor" && this.areAllHeroesInStartTractor()) {
+      this.startEscapeSequence();
+    }
   }
 
-  private isMapFullyRevealed(): boolean {
-    let hasActiveCloud = false;
+  private isEscapeSequenceActive(): boolean {
+    return this.missionPhase === "escaping";
+  }
 
-    this.forEachActiveCloudSprite(() => {
-      hasActiveCloud = true;
+  private startReturnToTractorObjective(): void {
+    this.missionPhase = "return-to-tractor";
+    const tractor = this.getStartTractor();
+
+    if (tractor) {
+      this.addMarker(this.getVehicleMarkerPoint(tractor), "target");
+    }
+  }
+
+  private areAllHeroesInStartTractor(): boolean {
+    return ESCAPE_CHARACTER_IDS.every((characterId) => {
+      const character = this.characters.get(characterId);
+      return (
+        character &&
+        !character.isDead() &&
+        !character.isBound() &&
+        this.characterVehicles.get(characterId) === START_TRACTOR_ID
+      );
     });
+  }
 
-    return !hasActiveCloud;
+  private startEscapeSequence(): void {
+    this.missionPhase = "escaping";
+    this.escapeSequence = { elapsed: 0 };
+    this.droneInput.clear();
+    this.cameraInput.clear();
+    this.tieAttempts.clear();
+    this.doorOpenAttempts.clear();
+    this.vehicleBoardAttempts.clear();
+    this.aimTargets.clear();
+    this.enemyShotStates.clear();
+    this.pendingDroneShot = null;
+    this.alarmActive = false;
+    this.alarmFlash = null;
+    this.cameraMode = "free";
+  }
+
+  private updateEscapeSequence(deltaTime: number): void {
+    if (!this.escapeSequence) {
+      return;
+    }
+
+    this.escapeSequence.elapsed += deltaTime;
+    const movement = {
+      x: ESCAPE_DIRECTION.x * ESCAPE_SPEED * deltaTime,
+      y: ESCAPE_DIRECTION.y * ESCAPE_SPEED * deltaTime
+    };
+
+    for (const object of this.getTowRigObjects()) {
+      object.position = {
+        x: object.position.x + movement.x,
+        y: object.position.y + movement.y
+      };
+      this.advanceVehicleFrame(object);
+    }
+
+    this.syncVehicleOccupantsToVehicles();
+
+    if (this.areTowRigObjectsOutOfFrame()) {
+      this.completeLevel();
+    }
+  }
+
+  private advanceVehicleFrame(object: PlacedLevelObject): void {
+    if (!object.frame) {
+      return;
+    }
+
+    const column = Math.floor(this.elapsedTime * ESCAPE_ANIMATION_FPS) % object.frame.columns;
+    object.frame = {
+      ...object.frame,
+      column
+    };
+  }
+
+  private syncVehicleOccupantsToVehicles(): void {
+    for (const [characterId, objectId] of this.characterVehicles) {
+      const character = this.characters.get(characterId);
+      const object = this.getLevelObject(objectId);
+
+      if (!character || !object) {
+        continue;
+      }
+
+      character.state.position = this.getVehicleSeatPoint(object);
+    }
+  }
+
+  private areTowRigObjectsOutOfFrame(): boolean {
+    const bounds = this.camera.getVisibleBounds();
+
+    return this.getTowRigObjects().every((object) => this.isLevelObjectOutOfFrame(object, bounds));
+  }
+
+  private isLevelObjectOutOfFrame(
+    object: PlacedLevelObject,
+    bounds: { x: number; y: number; width: number; height: number }
+  ): boolean {
+    const size = this.getLevelObjectRenderSize(object);
+    const anchor = this.getLevelObjectAnchor(object);
+    const left = object.position.x - size.width * anchor.x;
+    const right = left + size.width;
+    const top = object.position.y - size.height * anchor.y;
+    const bottom = top + size.height;
+    const padding = 64;
+
+    return (
+      right < bounds.x - padding ||
+      left > bounds.x + bounds.width + padding ||
+      bottom < bounds.y - padding ||
+      top > bounds.y + bounds.height + padding
+    );
+  }
+
+  private getTowRigObjects(): PlacedLevelObject[] {
+    const objects: PlacedLevelObject[] = [];
+    const tractor = this.getStartTractor();
+    const towedVehicle = this.getStartTowedVehicle();
+
+    if (tractor) {
+      objects.push(tractor);
+    }
+    if (towedVehicle) {
+      objects.push(towedVehicle);
+    }
+
+    return objects;
+  }
+
+  private getStartTractor(): PlacedLevelObject | null {
+    return this.getLevelObject(START_TRACTOR_ID);
+  }
+
+  private getStartTowedVehicle(): PlacedLevelObject | null {
+    return this.getLevelObject(START_TOWED_VEHICLE_ID);
   }
 
   private completeLevel(): void {
@@ -2896,6 +3058,10 @@ export class Game {
   }
 
   private doesCharacterFootOverlapActiveCloud(position: WorldPoint): boolean {
+    if (this.isDoorAccessPosition(position)) {
+      return false;
+    }
+
     let overlapsCloud = false;
 
     this.forEachActiveCloudSprite((cloud) => {
@@ -2917,6 +3083,22 @@ export class Game {
     return overlapsCloud;
   }
 
+  private isDoorAccessPosition(position: WorldPoint): boolean {
+    for (const object of this.levelObjects) {
+      const interaction = object.interaction;
+      if (!interaction || interaction.type !== "open-door") {
+        continue;
+      }
+
+      const accessRadius = Math.min(interaction.range, 110);
+      if (distanceSquared(position, this.getDoorInteractionPoint(object)) <= accessRadius * accessRadius) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   private getCloudCollisionPolygon(cloud: CloudSpritePlacement): WorldPoint[] {
     const halfWidth = (cloud.width * GAME_CONFIG.cloud.collisionWidthRatio) / 2;
     const halfHeight = (cloud.height * GAME_CONFIG.cloud.collisionHeightRatio) / 2;
@@ -2933,19 +3115,6 @@ export class Game {
       x: cloud.position.x + corner.x * cos - corner.y * sin,
       y: cloud.position.y + corner.x * sin + corner.y * cos
     }));
-  }
-
-  private isMayaNearPhotoArtifact(): boolean {
-    const maya = this.characters.get("maya");
-
-    if (!maya || maya.isDead() || maya.isBound()) {
-      return false;
-    }
-
-    return (
-      distanceSquared(maya.state.position, this.photoArtifact.position) <=
-      this.photoArtifact.interactionRange * this.photoArtifact.interactionRange
-    );
   }
 
   private getShotTarget(
@@ -3128,11 +3297,6 @@ export class Game {
       });
     }
 
-    items.push({
-      sortY: this.photoArtifact.position.y,
-      kind: "photo"
-    });
-
     if (this.drone) {
       items.push({
         sortY: this.drone.position.y,
@@ -3170,9 +3334,6 @@ export class Game {
         return;
       case "enemy":
         item.enemy.draw(this.renderer.layers.sorted);
-        return;
-      case "photo":
-        this.drawPhotoArtifact();
         return;
       case "drone":
         item.drone.draw(this.renderer.layers.sorted);
@@ -3252,28 +3413,6 @@ export class Game {
     return frameTexture;
   }
 
-  private drawPhotoArtifact(): void {
-    const { position, radius } = this.photoArtifact;
-    const graphics = new Graphics();
-    this.renderer.layers.sorted.addChild(graphics);
-
-    graphics
-      .ellipse(position.x, position.y, radius, radius * 0.62)
-      .fill("#4e5a68")
-      .stroke({ color: "#151b21", width: 2 });
-    graphics
-      .ellipse(position.x, position.y - 12, radius * 0.68, radius * 0.38)
-      .fill("#87919c")
-      .stroke({ color: "#151b21", width: 2 });
-    graphics
-      .circle(position.x, position.y, this.photoArtifact.interactionRange)
-      .stroke({
-        color: "#f0e58f",
-        alpha: this.isMayaNearPhotoArtifact() ? 1 : 0.38,
-        width: 1
-      });
-  }
-
   private drawSpecialEffects(): void {
     const graphics = new Graphics();
     this.renderer.layers.effects.addChild(graphics);
@@ -3285,15 +3424,6 @@ export class Game {
         .moveTo(trace.from.x, trace.from.y)
         .lineTo(trace.to.x, trace.to.y)
         .stroke({ color: "#f5d46b", alpha, width: 3 });
-    }
-
-    for (const flash of this.photoFlashes) {
-      const progress = flash.age / flash.duration;
-      const alpha = Math.max(0, 1 - progress);
-
-      graphics
-        .circle(flash.position.x, flash.position.y - 12, 20 + progress * 44)
-        .stroke({ color: "#f6f2ce", alpha, width: 2 });
     }
   }
 
@@ -3586,26 +3716,6 @@ export class Game {
     };
   }
 
-  private drawMayaPhotoPrompt(): void {
-    if (!this.isMayaNearPhotoArtifact()) {
-      return;
-    }
-
-    const maya = this.characters.get("maya");
-    if (!maya) {
-      return;
-    }
-
-    this.renderer.layers.prompts.addChild(
-      new Graphics()
-        .moveTo(maya.state.position.x - 8, maya.state.position.y - 132)
-        .lineTo(maya.state.position.x + 8, maya.state.position.y - 116)
-        .moveTo(maya.state.position.x + 8, maya.state.position.y - 132)
-        .lineTo(maya.state.position.x - 8, maya.state.position.y - 116)
-        .stroke({ color: "#f6f2ce", width: 3 })
-    );
-  }
-
   private drawCloudZones(): void {
     if (this.level.cloudZones.length === 0 || !this.cloudTexture) {
       return;
@@ -3865,6 +3975,7 @@ export class Game {
     const bounds = this.camera.getVisibleBounds();
 
     return [
+      `dev mode: ${GAME_CONFIG.devMode.disableEnemies ? "no enemies" : "off"}`,
       `cursor: ${this.formatPoint(this.cursorWorld)}`,
       `camera: x=${bounds.x.toFixed(1)} y=${bounds.y.toFixed(1)}`,
       `visible: ${bounds.width.toFixed(0)} x ${bounds.height.toFixed(0)}`,

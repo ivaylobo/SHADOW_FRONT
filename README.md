@@ -25,7 +25,7 @@ The list below mirrors `CONTROL_HELP` in `src/game/config.ts`, which is rendered
 | Left-click hero | Select the hero |
 | Left-click prison gate | Send the selected hero to open it |
 | Left-click terrain | Move the selected hero to that point |
-| X | Maya photographs the artifact, Alyosha fires, Alek deploys or recalls his drone |
+| X | Alyosha fires, Alek deploys or recalls his drone |
 | Arrow keys | Pan the camera, or move Alek's deployed drone |
 | Shift + left-click | Run to the point |
 | Double left-click | Run to the point |
@@ -53,6 +53,7 @@ public/assets/
   cloud.png
   Maps/map-1.png
   objects/
+    MT-LB.png
     military_truck_8dir_6frames.png
     prison_gate_opening_6frames.png
     tractor_8dir_6frames.png
@@ -121,6 +122,8 @@ Collision is not inferred from pixels.
 - Maya starts bound in the right-side prison on level one; she cannot be selected or targeted by enemies until the prison gate opens.
 - Opening the prison gate releases Maya so she can be selected and moved.
 - Buildings and vehicles render as separate map objects and block hero/enemy movement.
+- The starting tractor is lined up with a towed MT-LB vehicle.
+- Heroes can board the starting tractor; while inside it, enemies cannot see or shoot them.
 - The prison gate plays its opening sprite animation and removes only its gate collision when open.
 - Nearby gates show an animated open prompt and can be opened with `E` or by left-clicking the gate.
 - Left-clicking terrain assigns a world-coordinate target and uses grid pathfinding to route around blockers.
@@ -128,25 +131,24 @@ Collision is not inferred from pixels.
 - `Shift + click` and double-click assign run movement.
 - `C` toggles `upright/prone`; prone movement uses crawl.
 - `Escape` stops the current movement.
-- `X` triggers the selected hero special action: Maya photographs the artifact only up close, Alyosha shoots toward the cursor within range, and Alek deploys or recalls his drone.
+- `X` triggers the selected hero special action: Alyosha shoots toward the cursor within range, and Alek deploys or recalls his drone.
 - Arrow keys pan the camera without moving a hero; Alek's deployed drone uses the same keys and pulls the camera with it.
 - Soft cloud sprites obscure world content until Alek scans them with the drone.
 - The drone clears cloud sprites persistently with the same radius as enemy vision range.
 - Active cloud sprites block hero movement until the drone clears them.
 - Level one has multiple drone-reveal cloud zones across the central road, prison approach, and southeast field.
-- Level one has six enemy patrols spread across the route and prison approach.
+- Level one has four enemy patrols spread across the route, with a lighter prison approach.
 - The side panel has a Description section populated from the active level definition.
-- Completing level one requires clearing the needed drone-reveal cloud zones to create a passable route and freeing Maya; success shows `well done!` and reloads after OK.
+- Completing level one requires freeing Maya, returning Maya, Alyosha, and Alek to the starting tractor, boarding all three, and letting the tractor tow the MT-LB out of frame; success shows `well done!` and reloads after OK.
 - Enemies raise the alarm as soon as the drone enters their vision cone, then shoot it after a short delay; one hit destroys it and plays the explosion row.
 - The game ends when any hero dies and offers a retry prompt.
-- Maya gets a temporary `X` prompt when she is near the artifact.
 - Heroes and enemies have 100 health; kalashnikov shots deal 50 damage.
 - Enemies can rescue bound allies, raise the alarm, investigate gunshots, search a wider route, and return to patrol.
 - Movement uses delta time and eight directions via `Math.atan2()`.
 - Collision uses ground points, foot radii, object collision shapes, and active cloud zones.
 - Invalid clicks show a short red marker and do not start movement.
 - The camera can free-pan, follow the selected hero, or follow the active drone while staying inside level bounds.
-- Rendering uses Y-sorting for objects, enemies, the artifact, and heroes.
+- Rendering uses Y-sorting for objects, enemies, the drone, and heroes.
 - Debug mode shows collision polygons, ground points, target lines, cursor world coordinates, frame index, and visible bounds.
 
 ## Next Phases

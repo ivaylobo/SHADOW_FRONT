@@ -12,6 +12,9 @@ export const ASSET_BASE_PATH = "/assets/characters/";
 export const SPRITE_MANIFEST_PATH = `${ASSET_BASE_PATH}movement-sprites-manifest-6frames.json`;
 
 export const GAME_CONFIG = {
+  devMode: {
+    disableEnemies: false
+  },
   uiPanelWidth: 286,
   renderScale: 1.46,
   arrivalThreshold: 5,
@@ -202,7 +205,7 @@ export const CONTROL_HELP: ControlHelpItem[] = [
   },
   {
     command: "X",
-    description: "Maya photographs the artifact, Alyosha fires, Alek deploys or recalls his drone"
+    description: "Alyosha fires, Alek deploys or recalls his drone"
   },
   {
     command: "Arrow keys",
