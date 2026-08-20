@@ -136,7 +136,7 @@ Collision is not inferred from pixels.
 - Level one has multiple drone-reveal cloud zones across the central road, prison approach, and southeast field.
 - Level one has six enemy patrols spread across the route and prison approach.
 - The side panel has a Description section populated from the active level definition.
-- Completing level one requires clearing all drone-reveal cloud zones and freeing Maya; success shows `well done!` and reloads after OK.
+- Completing level one requires clearing the needed drone-reveal cloud zones to create a passable route and freeing Maya; success shows `well done!` and reloads after OK.
 - Enemies raise the alarm as soon as the drone enters their vision cone, then shoot it after a short delay; one hit destroys it and plays the explosion row.
 - The game ends when any hero dies and offers a retry prompt.
 - Maya gets a temporary `X` prompt when she is near the artifact.

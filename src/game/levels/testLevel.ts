@@ -4,12 +4,13 @@ export const testLevel: LevelDefinition = {
   id: "level-one",
   name: "Level One",
   description: {
-    title: "Освобождаване на Мая",
+    title: "Free Maya",
     paragraphs: [
-      "Разкрийте картата с Алек. Изберете Алек с клавиш 3, натиснете X, за да пуснете дрона, и движете дрона със стрелките. Докато Алек е избран и дронът е активен, камерата следва дрона и всяка обходена скрита зона се разкрива. Ако дронът не е активен или Алек не е избран, стрелките само местят камерата.",
-      "След като скритите зони са разкрити, изпратете Альоша или Алек до вратата на затвора. Отворете я с E, когато героят е достатъчно близо, или с ляв клик върху самата врата."
+      "Reveal the map with Alek. Select Alek with key 3, press X to deploy the drone, and move the drone with the arrow keys. While Alek is selected and the drone is active, the camera follows the drone and hidden zones are revealed as the drone passes over them. If the drone is not active or Alek is not selected, the arrow keys only move the camera.",
+      "Clear the needed hidden zones to create a route the heroes can actually walk through. Heroes cannot pass under cloud cover; any cloud blocking the route must be revealed before they can move through it.",
+      "After the needed route is revealed, send Alyosha or Alek to the prison gate. Open it with E when the hero is close enough, or left-click the gate itself."
     ],
-    completion: "Нивото се счита за изпълнено, когато всички зони за разкриване с дрона са изчистени и Мая е освободена чрез отваряне на вратата."
+    completion: "The level is complete when the needed drone-reveal zones are cleared to create a passable route and Maya has been freed by opening the gate."
   },
   worldSize: {
     width: 2508,
