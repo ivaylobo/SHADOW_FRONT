@@ -65,11 +65,6 @@ type RenderItem =
     }
   | {
       sortY: number;
-      kind: "drone";
-      drone: Drone;
-    }
-  | {
-      sortY: number;
       kind: "character";
       character: Character;
     };
@@ -1150,22 +1145,36 @@ export class Game {
     object: PlacedLevelObject,
     point: WorldPoint
   ): boolean {
-    if (this.containsLevelObjectPoint(object, point)) {
-      return true;
-    }
-
     const interaction = object.interaction;
     if (!interaction) {
       return false;
     }
 
+    if (interaction.type === "open-door") {
+      return this.containsDoorClickPoint(object, point);
+    }
+
+    if (this.containsLevelObjectPoint(object, point)) {
+      return true;
+    }
+
     const interactionPoint =
-      interaction.type === "open-door"
-        ? this.getDoorInteractionPoint(object)
-        : this.getVehicleInteractionPoint(object);
+      interaction.type === "enter-vehicle" ? this.getVehicleInteractionPoint(object) : object.position;
     const radius = Math.min(interaction.range, 86);
 
     return distanceSquared(point, interactionPoint) <= radius * radius;
+  }
+
+  private containsDoorClickPoint(object: PlacedLevelObject, point: WorldPoint): boolean {
+    const gateShapes = object.collisionShapes.filter((shape) => shape.disabledWhenOpen);
+    const shapes = gateShapes.length > 0 ? gateShapes : object.collisionShapes;
+
+    return shapes.some((shape) =>
+      pointInPolygon(
+        point,
+        shape.points.map((shapePoint) => this.localObjectPointToWorld(object, shapePoint))
+      )
+    );
   }
 
   private getLevelObjectRenderSize(object: PlacedLevelObject): Size {
@@ -3297,14 +3306,6 @@ export class Game {
       });
     }
 
-    if (this.drone) {
-      items.push({
-        sortY: this.drone.position.y,
-        kind: "drone",
-        drone: this.drone
-      });
-    }
-
     for (const character of this.characters.values()) {
       if (this.isCharacterInVehicle(character)) {
         continue;
@@ -3322,6 +3323,10 @@ export class Game {
     for (const item of items) {
       this.drawRenderItem(item);
     }
+
+    if (this.drone) {
+      this.drone.draw(this.renderer.layers.sorted);
+    }
   }
 
   private drawRenderItem(item: RenderItem): void {
@@ -3334,9 +3339,6 @@ export class Game {
         return;
       case "enemy":
         item.enemy.draw(this.renderer.layers.sorted);
-        return;
-      case "drone":
-        item.drone.draw(this.renderer.layers.sorted);
         return;
       case "character":
         item.character.draw(this.renderer.layers.sorted);
