@@ -166,6 +166,68 @@ export const testLevel: LevelDefinition = {
       }
     },
     {
+      id: "tractor-start",
+      label: "Tractor",
+      kind: "vehicle",
+      imagePath: "/assets/objects/tractor_8dir_6frames.png",
+      position: { x: 375, y: 2400 },
+      scale: 0.56,
+      frame: {
+        columns: 6,
+        rows: 8,
+        column: 0,
+        row: 5
+      },
+      collisionShapes: [
+        {
+          id: "tractor-body",
+          points: [
+            { x: -72, y: -60 },
+            { x: 62, y: -62 },
+            { x: 92, y: -24 },
+            { x: 72, y: 18 },
+            { x: -72, y: 20 },
+            { x: -94, y: -22 }
+          ]
+        }
+      ],
+      interaction: {
+        type: "enter-vehicle",
+        point: { x: -118, y: -12 },
+        range: 58,
+        promptOffset: { x: 118, y: -128 },
+        exitOffset: { x: -150, y: 10 },
+        hiddenFromEnemies: true
+      }
+    },
+    {
+      id: "military-truck-start",
+      label: "Military Truck",
+      kind: "vehicle",
+      imagePath: "/assets/objects/military_truck_8dir_6frames.png",
+      position: { x: 455, y: 2240 },
+      scale: 0.58,
+      frame: {
+        columns: 6,
+        rows: 8,
+        column: 0,
+        row: 6
+      },
+      collisionShapes: [
+        {
+          id: "truck-body",
+          points: [
+            { x: -110, y: -74 },
+            { x: 88, y: -70 },
+            { x: 120, y: -28 },
+            { x: 98, y: 18 },
+            { x: -88, y: 22 },
+            { x: -124, y: -26 }
+          ]
+        }
+      ]
+    },
+    {
       id: "military-truck-north",
       label: "Military Truck",
       kind: "vehicle",

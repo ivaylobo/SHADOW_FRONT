@@ -43,7 +43,7 @@ export interface LevelObjectEntryZone {
   requiresKeyId?: string;
 }
 
-export interface LevelObjectInteraction {
+export interface LevelObjectDoorInteraction {
   type: "open-door";
   point: WorldPoint;
   range: number;
@@ -53,6 +53,17 @@ export interface LevelObjectInteraction {
   fps: number;
   oneShot?: boolean;
 }
+
+export interface LevelObjectVehicleInteraction {
+  type: "enter-vehicle";
+  point: WorldPoint;
+  range: number;
+  promptOffset: WorldPoint;
+  exitOffset: WorldPoint;
+  hiddenFromEnemies?: boolean;
+}
+
+export type LevelObjectInteraction = LevelObjectDoorInteraction | LevelObjectVehicleInteraction;
 
 export interface LevelObjectDefinition {
   id: string;

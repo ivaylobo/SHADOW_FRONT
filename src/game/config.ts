@@ -193,6 +193,10 @@ export const CONTROL_HELP: ControlHelpItem[] = [
     description: "Send the selected hero to open it"
   },
   {
+    command: "Left-click tractor",
+    description: "Send the selected hero to board it, or dismount if already inside"
+  },
+  {
     command: "Left-click terrain",
     description: "Move the selected hero to that point"
   },

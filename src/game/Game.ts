@@ -109,6 +109,10 @@ interface DoorOpenAttempt {
   objectId: string;
 }
 
+interface VehicleBoardAttempt {
+  objectId: string;
+}
+
 type DoorRuntimeStatus = "closed" | "opening" | "open";
 
 interface DoorRuntimeState {
@@ -137,6 +141,9 @@ interface CloudSpritePlacement {
 interface PlacedLevelObject extends LevelObjectDefinition {
   position: WorldPoint;
 }
+
+type LevelObjectInteractionType = NonNullable<LevelObjectDefinition["interaction"]>["type"];
+type VehiclePromptMode = "mount" | "dismount";
 
 interface PathCell {
   x: number;
@@ -197,6 +204,9 @@ export class Game {
   private elapsedTime = 0;
   private readonly tieAttempts = new Map<CharacterId, TieAttempt>();
   private readonly doorOpenAttempts = new Map<CharacterId, DoorOpenAttempt>();
+  private readonly vehicleBoardAttempts = new Map<CharacterId, VehicleBoardAttempt>();
+  private readonly characterVehicles = new Map<CharacterId, string>();
+  private readonly vehicleOccupants = new Map<string, Set<CharacterId>>();
   private readonly doorStates = new Map<string, DoorRuntimeState>();
   private readonly aimTargets = new Map<CharacterId, EnemyId>();
   private readonly enemyShotStates = new Map<EnemyId, EnemyShotState>();
@@ -411,6 +421,9 @@ export class Game {
     this.objectTextures.clear();
     this.objectFrameTextures.clear();
     this.doorStates.clear();
+    this.vehicleBoardAttempts.clear();
+    this.characterVehicles.clear();
+    this.vehicleOccupants.clear();
 
     for (const [path, image] of Object.entries(objectImages)) {
       this.objectTextures.set(path, Texture.from(image));
@@ -455,6 +468,7 @@ export class Game {
     this.elapsedTime += deltaTime;
     this.syncTieAttemptTargets();
     this.syncDoorOpenAttemptTargets();
+    this.syncVehicleBoardAttemptTargets();
 
     for (const character of this.characters.values()) {
       if (character.hasActiveWork()) {
@@ -472,6 +486,7 @@ export class Game {
     this.updateDrone(deltaTime);
     this.updateTieAttempts();
     this.updateDoorOpenAttempts();
+    this.updateVehicleBoardAttempts();
     this.updateDoorAnimations(deltaTime);
     this.updateLevelCompletion();
     if (this.levelCompleted) {
@@ -586,7 +601,8 @@ export class Game {
       this.drone?.isDeployed() &&
         selectedCharacter.id === "alek" &&
         !selectedCharacter.isDead() &&
-        !selectedCharacter.isBound()
+        !selectedCharacter.isBound() &&
+        !this.isCharacterInVehicle(selectedCharacter)
     );
   }
 
@@ -632,6 +648,7 @@ export class Game {
     this.drawSpecialEffects();
     this.drawTiePrompts();
     this.drawDoorOpenPrompts();
+    this.drawVehiclePrompts();
     this.drawMayaPhotoPrompt();
     this.drawCloudZones();
 
@@ -668,20 +685,44 @@ export class Game {
         clickedCharacter.stop();
         this.tieAttempts.delete(clickedCharacter.id);
         this.doorOpenAttempts.delete(clickedCharacter.id);
+        this.vehicleBoardAttempts.delete(clickedCharacter.id);
       }
       return;
     }
-
-    const clickedEnemy = this.findEnemyAt(command.worldPosition);
 
     if (selectedCharacter.isDead() || selectedCharacter.isBound()) {
       this.addMarker(command.worldPosition, "invalid");
       return;
     }
 
+    const clickedVehicleObject = this.findInteractiveLevelObjectAt(command.worldPosition, "enter-vehicle");
+    if (clickedVehicleObject) {
+      this.cameraMode = "follow-selected";
+      this.tieAttempts.delete(selectedCharacter.id);
+      this.doorOpenAttempts.delete(selectedCharacter.id);
+      this.vehicleBoardAttempts.delete(selectedCharacter.id);
+      this.aimTargets.delete(selectedCharacter.id);
+
+      if (!this.handleVehicleCommand(selectedCharacter, clickedVehicleObject)) {
+        this.addMarker(this.getVehicleMarkerPoint(clickedVehicleObject), "invalid");
+        return;
+      }
+
+      this.addMarker(this.getVehicleMarkerPoint(clickedVehicleObject), "target");
+      return;
+    }
+
+    if (this.isCharacterInVehicle(selectedCharacter)) {
+      this.addMarker(selectedCharacter.state.position, "invalid");
+      return;
+    }
+
+    const clickedEnemy = this.findEnemyAt(command.worldPosition);
+
     if (clickedEnemy) {
       this.cameraMode = "follow-selected";
       this.doorOpenAttempts.delete(selectedCharacter.id);
+      this.vehicleBoardAttempts.delete(selectedCharacter.id);
       this.aimTargets.set(selectedCharacter.id, clickedEnemy.id);
 
       if (!this.startTieAttempt(selectedCharacter, clickedEnemy)) {
@@ -693,10 +734,11 @@ export class Game {
       return;
     }
 
-    const clickedDoorObject = this.findInteractiveLevelObjectAt(command.worldPosition);
+    const clickedDoorObject = this.findInteractiveLevelObjectAt(command.worldPosition, "open-door");
     if (clickedDoorObject) {
       this.cameraMode = "follow-selected";
       this.tieAttempts.delete(selectedCharacter.id);
+      this.vehicleBoardAttempts.delete(selectedCharacter.id);
       this.aimTargets.delete(selectedCharacter.id);
 
       if (!this.startDoorOpenAttempt(selectedCharacter, clickedDoorObject)) {
@@ -718,6 +760,7 @@ export class Game {
 
     this.tieAttempts.delete(selectedCharacter.id);
     this.doorOpenAttempts.delete(selectedCharacter.id);
+    this.vehicleBoardAttempts.delete(selectedCharacter.id);
     this.aimTargets.delete(selectedCharacter.id);
     this.cameraMode = "follow-selected";
     this.addMarker(command.worldPosition, "target");
@@ -729,12 +772,14 @@ export class Game {
     if (
       character.isDead() ||
       character.isBound() ||
+      this.isCharacterInVehicle(character) ||
       (character.state.action && character.state.action !== "shoot")
     ) {
       this.logCombat("player shot blocked", {
         character: character.id,
         dead: character.isDead(),
         bound: character.isBound(),
+        inVehicle: this.isCharacterInVehicle(character),
         action: character.state.action
       });
       return;
@@ -743,6 +788,7 @@ export class Game {
     const pendingEnemyTargetId = this.tieAttempts.get(character.id)?.enemyId ?? null;
     this.tieAttempts.delete(character.id);
     this.doorOpenAttempts.delete(character.id);
+    this.vehicleBoardAttempts.delete(character.id);
 
     if (character.id === "alek") {
       this.toggleDrone(character);
@@ -906,7 +952,10 @@ export class Game {
     }
 
     if (normalizedKey === "c" || code === "KeyC") {
-      this.getSelectedCharacter().toggleStance();
+      const character = this.getSelectedCharacter();
+      if (!this.isCharacterInVehicle(character)) {
+        character.toggleStance();
+      }
       return;
     }
 
@@ -940,6 +989,7 @@ export class Game {
       character.stop();
       this.tieAttempts.delete(character.id);
       this.doorOpenAttempts.delete(character.id);
+      this.vehicleBoardAttempts.delete(character.id);
       this.aimTargets.delete(character.id);
       this.droneInput.clear();
       this.cameraInput.clear();
@@ -975,7 +1025,9 @@ export class Game {
 
     this.cameraInput.clear();
     this.cameraMode =
-      id === "alek" && this.drone?.isDeployed() ? "follow-drone" : "follow-selected";
+      id === "alek" && this.drone?.isDeployed() && !this.isCharacterInVehicle(selectedCharacter)
+        ? "follow-drone"
+        : "follow-selected";
   }
 
   private selectInitialCharacter(): void {
@@ -1016,6 +1068,10 @@ export class Game {
     let topY = -Infinity;
 
     for (const character of this.characters.values()) {
+      if (this.isCharacterInVehicle(character)) {
+        continue;
+      }
+
       const sortY = character.state.position.y;
 
       if (sortY <= topY || !character.containsWorldPoint(point)) {
@@ -1047,12 +1103,19 @@ export class Game {
     return topEnemy;
   }
 
-  private findInteractiveLevelObjectAt(point: WorldPoint): PlacedLevelObject | null {
+  private findInteractiveLevelObjectAt(
+    point: WorldPoint,
+    interactionType?: LevelObjectInteractionType
+  ): PlacedLevelObject | null {
     let topObject: PlacedLevelObject | null = null;
     let topY = -Infinity;
 
     for (const object of this.levelObjects) {
-      if (!object.interaction || !this.containsLevelObjectPoint(object, point)) {
+      if (
+        !object.interaction ||
+        (interactionType && object.interaction.type !== interactionType) ||
+        !this.containsLevelObjectPoint(object, point)
+      ) {
         continue;
       }
 
@@ -1100,6 +1163,12 @@ export class Game {
 
   private updateAimTargetFromPoint(point: WorldPoint): void {
     const selectedCharacter = this.getSelectedCharacter();
+
+    if (this.isCharacterInVehicle(selectedCharacter)) {
+      this.aimTargets.delete(selectedCharacter.id);
+      return;
+    }
+
     const enemy = this.findEnemyAt(point);
 
     if (enemy && !enemy.isDead()) {
@@ -1149,15 +1218,39 @@ export class Game {
       return null;
     }
 
-    const object = this.findInteractiveLevelObjectAt(this.cursorWorld);
+    const object = this.findInteractiveLevelObjectAt(this.cursorWorld, "open-door");
     return object && this.canStartDoorOpenAttempt(this.getSelectedCharacter(), object)
       ? object
       : null;
   }
 
+  private getHoveredVehiclePrompt(): { object: PlacedLevelObject; mode: VehiclePromptMode } | null {
+    if (!this.cursorWorld || this.findCharacterAt(this.cursorWorld)) {
+      return null;
+    }
+
+    const object = this.findInteractiveLevelObjectAt(this.cursorWorld, "enter-vehicle");
+    if (!object) {
+      return null;
+    }
+
+    const selectedCharacter = this.getSelectedCharacter();
+    const selectedVehicleId = this.characterVehicles.get(selectedCharacter.id);
+
+    if (selectedVehicleId) {
+      return selectedVehicleId === object.id && this.canDismountVehicle(selectedCharacter, object)
+        ? { object, mode: "dismount" }
+        : null;
+    }
+
+    return this.canStartVehicleBoardAttempt(selectedCharacter, object)
+      ? { object, mode: "mount" }
+      : null;
+  }
+
   private updateCanvasCursor(): void {
     this.canvas.style.cursor =
-      this.getHoveredTieEnemy() || this.getHoveredDoorObject()
+      this.getHoveredTieEnemy() || this.getHoveredDoorObject() || this.getHoveredVehiclePrompt()
         ? "pointer"
         : "crosshair";
   }
@@ -1168,6 +1261,10 @@ export class Game {
     requestedMotion: TerrainMotion,
     speedOverride: number | null = null
   ): boolean {
+    if (this.isCharacterInVehicle(character)) {
+      return false;
+    }
+
     if (!this.isCharacterPositionWalkable(character, targetPosition)) {
       return false;
     }
@@ -1437,7 +1534,7 @@ export class Game {
   }
 
   private startTieAttempt(character: Character, enemy: Enemy): boolean {
-    if (character.isDead() || character.isBound()) {
+    if (character.isDead() || character.isBound() || this.isCharacterInVehicle(character)) {
       return false;
     }
 
@@ -1453,6 +1550,7 @@ export class Game {
       enemyId: enemy.id
     });
     this.doorOpenAttempts.delete(character.id);
+    this.vehicleBoardAttempts.delete(character.id);
 
     character.setTarget(enemy.position, "walk", GAME_CONFIG.tie.walkSpeed);
     return true;
@@ -1533,6 +1631,7 @@ export class Game {
     }
 
     this.tieAttempts.delete(character.id);
+    this.vehicleBoardAttempts.delete(character.id);
     this.aimTargets.delete(character.id);
 
     if (this.tryCompleteDoorOpen(character, object)) {
@@ -1604,12 +1703,269 @@ export class Game {
     }
   }
 
+  private handleVehicleCommand(character: Character, object: PlacedLevelObject): boolean {
+    const vehicleId = this.characterVehicles.get(character.id);
+
+    if (vehicleId) {
+      return vehicleId === object.id && this.tryDismountVehicle(character, object);
+    }
+
+    return this.startVehicleBoardAttempt(character, object);
+  }
+
+  private startVehicleBoardAttempt(character: Character, object: PlacedLevelObject): boolean {
+    if (!this.canStartVehicleBoardAttempt(character, object)) {
+      return false;
+    }
+
+    this.tieAttempts.delete(character.id);
+    this.doorOpenAttempts.delete(character.id);
+    this.vehicleBoardAttempts.delete(character.id);
+    this.aimTargets.delete(character.id);
+
+    if (this.tryCompleteVehicleBoard(character, object)) {
+      return true;
+    }
+
+    if (!this.moveCharacterTo(
+      character,
+      this.getVehicleInteractionPoint(object),
+      "walk",
+      GAME_CONFIG.tie.walkSpeed
+    )) {
+      return false;
+    }
+
+    this.vehicleBoardAttempts.set(character.id, {
+      objectId: object.id
+    });
+    return true;
+  }
+
+  private syncVehicleBoardAttemptTargets(): void {
+    for (const [characterId, attempt] of this.vehicleBoardAttempts) {
+      const character = this.characters.get(characterId);
+      const object = this.getLevelObject(attempt.objectId);
+
+      if (!character || !object) {
+        this.vehicleBoardAttempts.delete(characterId);
+        continue;
+      }
+
+      if (
+        this.isCharacterInVehicle(character) ||
+        character.state.action ||
+        character.state.stance !== "upright" ||
+        !character.state.targetPosition ||
+        !this.canStartVehicleBoardAttempt(character, object)
+      ) {
+        character.stop();
+        this.vehicleBoardAttempts.delete(characterId);
+        continue;
+      }
+    }
+  }
+
+  private updateVehicleBoardAttempts(): void {
+    for (const [characterId, attempt] of this.vehicleBoardAttempts) {
+      const character = this.characters.get(characterId);
+      const object = this.getLevelObject(attempt.objectId);
+
+      if (!character || !object) {
+        this.vehicleBoardAttempts.delete(characterId);
+        continue;
+      }
+
+      if (!this.canStartVehicleBoardAttempt(character, object)) {
+        character.stop();
+        this.vehicleBoardAttempts.delete(characterId);
+        continue;
+      }
+
+      if (this.tryCompleteVehicleBoard(character, object)) {
+        this.vehicleBoardAttempts.delete(characterId);
+        continue;
+      }
+
+      if (!character.state.targetPosition) {
+        this.vehicleBoardAttempts.delete(characterId);
+      }
+    }
+  }
+
+  private canStartVehicleBoardAttempt(character: Character, object: PlacedLevelObject): boolean {
+    const interaction = object.interaction;
+
+    return Boolean(
+      interaction &&
+        interaction.type === "enter-vehicle" &&
+        object.kind === "vehicle" &&
+        !character.isDead() &&
+        !character.isBound() &&
+        !this.isCharacterInVehicle(character) &&
+        character.state.stance === "upright" &&
+        !character.state.action
+    );
+  }
+
+  private tryCompleteVehicleBoard(character: Character, object: PlacedLevelObject): boolean {
+    if (!this.canStartVehicleBoardAttempt(character, object)) {
+      return false;
+    }
+
+    const interactionPoint = this.getVehicleInteractionPoint(object);
+    const range = this.getVehicleInteractionRange(object);
+
+    if (distanceSquared(character.state.position, interactionPoint) > range * range) {
+      return false;
+    }
+
+    this.mountCharacterInVehicle(character, object);
+    this.addMarker(this.getVehicleMarkerPoint(object), "target");
+    return true;
+  }
+
+  private mountCharacterInVehicle(character: Character, object: PlacedLevelObject): void {
+    character.stop();
+    character.state.position = this.getVehicleSeatPoint(object);
+    character.state.stance = "upright";
+    this.characterVehicles.set(character.id, object.id);
+    this.getVehicleOccupants(object.id).add(character.id);
+    this.vehicleBoardAttempts.delete(character.id);
+    this.tieAttempts.delete(character.id);
+    this.doorOpenAttempts.delete(character.id);
+    this.aimTargets.delete(character.id);
+    if (character.state.selected) {
+      this.droneInput.clear();
+      this.cameraMode = "follow-selected";
+    }
+    this.stopEnemyAttacksAgainstCharacter(character, "target-entered-vehicle");
+  }
+
+  private tryDismountVehicle(character: Character, object: PlacedLevelObject): boolean {
+    if (!this.canDismountVehicle(character, object)) {
+      return false;
+    }
+
+    const exitPoint = this.getVehicleExitPoint(object);
+    this.removeCharacterFromVehicle(character);
+    character.stop();
+    character.state.position = exitPoint;
+    character.state.stance = "upright";
+    this.addMarker(exitPoint, "target");
+    return true;
+  }
+
+  private canDismountVehicle(character: Character, object: PlacedLevelObject): boolean {
+    const interaction = object.interaction;
+
+    return Boolean(
+      interaction &&
+        interaction.type === "enter-vehicle" &&
+        this.characterVehicles.get(character.id) === object.id &&
+        !character.isDead() &&
+        !character.isBound() &&
+        this.isCharacterPositionWalkable(character, this.getVehicleExitPoint(object))
+    );
+  }
+
+  private removeCharacterFromVehicle(character: Character): void {
+    const vehicleId = this.characterVehicles.get(character.id);
+    if (!vehicleId) {
+      return;
+    }
+
+    this.characterVehicles.delete(character.id);
+    this.vehicleOccupants.get(vehicleId)?.delete(character.id);
+  }
+
+  private getVehicleOccupants(objectId: string): Set<CharacterId> {
+    let occupants = this.vehicleOccupants.get(objectId);
+
+    if (!occupants) {
+      occupants = new Set<CharacterId>();
+      this.vehicleOccupants.set(objectId, occupants);
+    }
+
+    return occupants;
+  }
+
+  private getVehicleInteractionPoint(object: PlacedLevelObject): WorldPoint {
+    const interaction = object.interaction;
+    return interaction?.type === "enter-vehicle"
+      ? this.localObjectPointToWorld(object, interaction.point)
+      : object.position;
+  }
+
+  private getVehicleInteractionRange(object: PlacedLevelObject): number {
+    const interaction = object.interaction;
+    return interaction?.type === "enter-vehicle" ? interaction.range : GAME_CONFIG.tie.catchRange;
+  }
+
+  private getVehiclePromptPoint(object: PlacedLevelObject): WorldPoint {
+    const interaction = object.interaction;
+    if (!interaction || interaction.type !== "enter-vehicle") {
+      return object.position;
+    }
+
+    return this.localObjectPointToWorld(object, {
+      x: interaction.point.x + interaction.promptOffset.x,
+      y: interaction.point.y + interaction.promptOffset.y
+    });
+  }
+
+  private getVehicleMarkerPoint(object: PlacedLevelObject): WorldPoint {
+    return this.getVehiclePromptPoint(object);
+  }
+
+  private getVehicleExitPoint(object: PlacedLevelObject): WorldPoint {
+    const interaction = object.interaction;
+    return interaction?.type === "enter-vehicle"
+      ? this.localObjectPointToWorld(object, interaction.exitOffset)
+      : object.position;
+  }
+
+  private getVehicleSeatPoint(object: PlacedLevelObject): WorldPoint {
+    return this.localObjectPointToWorld(object, { x: 0, y: -18 });
+  }
+
+  private isCharacterInVehicle(character: Character): boolean {
+    return this.characterVehicles.has(character.id);
+  }
+
+  private isCharacterHiddenFromEnemies(character: Character): boolean {
+    const vehicle = this.getCharacterVehicle(character);
+    const interaction = vehicle?.interaction;
+
+    return Boolean(interaction?.type === "enter-vehicle" && interaction.hiddenFromEnemies);
+  }
+
+  private getCharacterVehicle(character: Character): PlacedLevelObject | null {
+    const vehicleId = this.characterVehicles.get(character.id);
+    return vehicleId ? this.getLevelObject(vehicleId) : null;
+  }
+
+  private stopEnemyAttacksAgainstCharacter(character: Character, reason: string): void {
+    for (const [enemyId, shotState] of this.enemyShotStates) {
+      if (shotState.targetId !== character.id) {
+        continue;
+      }
+
+      const enemy = this.enemies.get(enemyId);
+      if (enemy) {
+        this.stopEnemyShooting(enemy, reason);
+      } else {
+        this.enemyShotStates.delete(enemyId);
+      }
+    }
+  }
+
   private updateDoorAnimations(deltaTime: number): void {
     for (const object of this.levelObjects) {
       const interaction = object.interaction;
       const state = this.doorStates.get(object.id);
 
-      if (!interaction || !state || state.status !== "opening") {
+      if (!interaction || interaction.type !== "open-door" || !state || state.status !== "opening") {
         continue;
       }
 
@@ -1641,8 +1997,13 @@ export class Game {
       return false;
     }
 
+    const interaction = object.interaction;
+    if (!interaction || interaction.type !== "open-door") {
+      return false;
+    }
+
     const interactionPoint = this.getDoorInteractionPoint(object);
-    const range = object.interaction?.range ?? GAME_CONFIG.tie.catchRange;
+    const range = interaction.range;
 
     if (
       distanceSquared(character.state.position, interactionPoint) >
@@ -1664,7 +2025,7 @@ export class Game {
     this.logCombat("door opening", {
       character: character.id,
       object: object.id,
-      requiresKeyId: object.interaction?.requiresKeyId ?? null
+      requiresKeyId: interaction.requiresKeyId ?? null
     });
     return true;
   }
@@ -1675,10 +2036,15 @@ export class Game {
       return;
     }
 
+    const interaction = object.interaction;
+    if (!interaction || interaction.type !== "open-door") {
+      return;
+    }
+
     state.status = "open";
     state.elapsed = 0;
 
-    for (const captiveId of object.interaction?.releaseCaptiveIds ?? []) {
+    for (const captiveId of interaction.releaseCaptiveIds ?? []) {
       const captive = this.characters.get(captiveId);
       if (!captive?.isBound()) {
         continue;
@@ -1726,6 +2092,7 @@ export class Game {
     this.cameraInput.clear();
     this.enemyShotStates.clear();
     this.doorOpenAttempts.clear();
+    this.vehicleBoardAttempts.clear();
     this.pendingDroneShot = null;
     this.loop.stop();
     window.setTimeout(() => this.showLevelCompletePrompt(), 0);
@@ -1749,6 +2116,7 @@ export class Game {
       interaction.type !== "open-door" ||
       character.isDead() ||
       character.isBound() ||
+      this.isCharacterInVehicle(character) ||
       character.state.stance !== "upright" ||
       character.state.action ||
       this.isDoorOpenOrOpening(object)
@@ -1936,7 +2304,13 @@ export class Game {
   }
 
   private canEnemyShootCharacter(enemy: Enemy, character: Character): boolean {
-    if (enemy.isDead() || enemy.state === "bound" || character.isDead() || character.isBound()) {
+    if (
+      enemy.isDead() ||
+      enemy.state === "bound" ||
+      character.isDead() ||
+      character.isBound() ||
+      this.isCharacterHiddenFromEnemies(character)
+    ) {
       return false;
     }
 
@@ -2094,7 +2468,7 @@ export class Game {
   }
 
   private canEnemySeeCharacter(enemy: Enemy, character: Character): boolean {
-    if (character.isDead() || character.isBound()) {
+    if (character.isDead() || character.isBound() || this.isCharacterHiddenFromEnemies(character)) {
       return false;
     }
 
@@ -2317,6 +2691,7 @@ export class Game {
     if (killed) {
       this.tieAttempts.delete(character.id);
       this.doorOpenAttempts.delete(character.id);
+      this.vehicleBoardAttempts.delete(character.id);
       this.aimTargets.delete(character.id);
       this.endGame(character, source);
     }
@@ -2341,6 +2716,7 @@ export class Game {
     this.droneInput.clear();
     this.enemyShotStates.clear();
     this.doorOpenAttempts.clear();
+    this.vehicleBoardAttempts.clear();
     this.pendingDroneShot = null;
     this.logCombat("game over", {
       killedCharacter: killedCharacter.id,
@@ -2766,6 +3142,10 @@ export class Game {
     }
 
     for (const character of this.characters.values()) {
+      if (this.isCharacterInVehicle(character)) {
+        continue;
+      }
+
       items.push({
         sortY: character.state.position.y,
         kind: "character",
@@ -2821,10 +3201,25 @@ export class Game {
 
     const sprite = new Sprite(texture);
     const anchor = this.getLevelObjectAnchor(object);
+
+    if (this.isSelectedCharacterInsideVehicle(object)) {
+      this.renderer.layers.sorted.addChild(
+        new Graphics()
+          .ellipse(object.position.x, object.position.y - 4, 48, 16)
+          .fill({ color: "#dedaa0", alpha: 0.15 })
+          .stroke({ color: "#ece28b", alpha: 0.76, width: 2 })
+      );
+    }
+
     sprite.anchor.set(anchor.x, anchor.y);
     sprite.position.set(object.position.x, object.position.y);
     sprite.scale.set(object.scale);
     this.renderer.layers.sorted.addChild(sprite);
+  }
+
+  private isSelectedCharacterInsideVehicle(object: PlacedLevelObject): boolean {
+    const selectedCharacter = this.getSelectedCharacter();
+    return this.characterVehicles.get(selectedCharacter.id) === object.id;
   }
 
   private getLevelObjectTexture(object: PlacedLevelObject): Texture | null {
@@ -2965,6 +3360,126 @@ export class Game {
     for (const prompt of prompts.values()) {
       this.drawDoorOpenPrompt(prompt.object, prompt.hovered);
     }
+  }
+
+  private drawVehiclePrompts(): void {
+    const prompts = new Map<
+      string,
+      { object: PlacedLevelObject; mode: VehiclePromptMode; hovered: boolean }
+    >();
+    const selectedCharacter = this.getSelectedCharacter();
+    const hoveredPrompt = this.getHoveredVehiclePrompt();
+
+    if (hoveredPrompt) {
+      prompts.set(hoveredPrompt.object.id, {
+        object: hoveredPrompt.object,
+        mode: hoveredPrompt.mode,
+        hovered: true
+      });
+    }
+
+    const selectedVehicle = this.getCharacterVehicle(selectedCharacter);
+    if (selectedVehicle && this.canDismountVehicle(selectedCharacter, selectedVehicle)) {
+      prompts.set(selectedVehicle.id, {
+        object: selectedVehicle,
+        mode: "dismount",
+        hovered: prompts.get(selectedVehicle.id)?.hovered ?? false
+      });
+    }
+
+    if (!this.isCharacterInVehicle(selectedCharacter)) {
+      for (const object of this.levelObjects) {
+        if (!this.canStartVehicleBoardAttempt(selectedCharacter, object)) {
+          continue;
+        }
+
+        const range = this.getVehicleInteractionRange(object);
+        if (
+          distanceSquared(
+            selectedCharacter.state.position,
+            this.getVehicleInteractionPoint(object)
+          ) <=
+          range * range
+        ) {
+          prompts.set(object.id, {
+            object,
+            mode: "mount",
+            hovered: prompts.get(object.id)?.hovered ?? false
+          });
+        }
+      }
+    }
+
+    for (const [characterId, attempt] of this.vehicleBoardAttempts) {
+      const character = this.characters.get(characterId);
+      const object = this.getLevelObject(attempt.objectId);
+      if (object && character && this.canStartVehicleBoardAttempt(character, object)) {
+        prompts.set(object.id, {
+          object,
+          mode: "mount",
+          hovered: prompts.get(object.id)?.hovered ?? false
+        });
+      }
+    }
+
+    for (const prompt of prompts.values()) {
+      this.drawVehiclePrompt(prompt.object, prompt.mode, prompt.hovered);
+    }
+  }
+
+  private drawVehiclePrompt(
+    object: PlacedLevelObject,
+    mode: VehiclePromptMode,
+    hovered: boolean
+  ): void {
+    const promptPoint = this.getVehiclePromptPoint(object);
+    const blink = 0.5 + Math.sin(this.elapsedTime * Math.PI * 4.8) * 0.5;
+    const bob = Math.sin(this.elapsedTime * Math.PI * 2.05) * 2.5;
+    const alpha = hovered ? 0.4 + blink * 0.6 : 0.5 + blink * 0.2;
+    const graphics = new Graphics();
+
+    graphics.position.set(promptPoint.x, promptPoint.y + bob);
+    graphics.alpha = alpha;
+    this.strokeVehicleActionIcon(graphics, mode, "#080a07", 6, 0.86);
+    this.strokeVehicleActionIcon(
+      graphics,
+      mode,
+      mode === "mount" ? "#eadba8" : "#bfe7ff",
+      2.6
+    );
+    this.renderer.layers.prompts.addChild(graphics);
+  }
+
+  private strokeVehicleActionIcon(
+    graphics: Graphics,
+    mode: VehiclePromptMode,
+    color: string,
+    width: number,
+    alpha = 1
+  ): void {
+    graphics
+      .rect(-17, -1, 34, 14)
+      .rect(-5, -13, 14, 12)
+      .circle(-9, 15, 4)
+      .circle(11, 15, 4);
+
+    if (mode === "mount") {
+      graphics
+        .moveTo(0, -31)
+        .lineTo(0, -17)
+        .moveTo(-7, -23)
+        .lineTo(0, -16)
+        .lineTo(7, -23);
+    } else {
+      graphics
+        .moveTo(0, -16)
+        .lineTo(0, -31)
+        .moveTo(-7, -24)
+        .lineTo(0, -31)
+        .lineTo(7, -24);
+    }
+
+    graphics.stroke({ color, alpha, width, cap: "round", join: "round" });
   }
 
   private drawDoorOpenPrompt(object: PlacedLevelObject, hovered: boolean): void {
@@ -3272,6 +3787,10 @@ export class Game {
     }
 
     for (const character of this.characters.values()) {
+      if (this.isCharacterInVehicle(character)) {
+        continue;
+      }
+
       character.drawDebug(this.renderer.layers.debug);
     }
 
