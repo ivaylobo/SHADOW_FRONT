@@ -51,6 +51,7 @@ export const GAME_CONFIG = {
   enemy: {
     sprite: {
       file: "enemy_movement_8dir_6frames_v6_bound.png",
+      arrestedFile: "enemy_movement_8dir_6frames_v6_bound_arrested.png",
       columns: 6,
       rows: 27,
       sheetWidth: 368,
@@ -77,6 +78,11 @@ export const GAME_CONFIG = {
     hitRadius: 42,
     rescueRange: 34,
     alarmDuration: 2.8
+  },
+  arrest: {
+    leadRange: 58,
+    followDistance: 42,
+    escortSpeed: 76
   },
   drone: {
     sprite: {
@@ -186,6 +192,10 @@ export const CONTROL_HELP: ControlHelpItem[] = [
   {
     command: "Hover + click enemy",
     description: "Follow the enemy and tie them if close enough"
+  },
+  {
+    command: "Hover + click arrested enemy",
+    description: "Lead them with the selected hero, or leave them in place"
   },
   {
     command: "Left-click hero",

@@ -8,6 +8,7 @@ export const testLevel: LevelDefinition = {
     paragraphs: [
       "Reveal the map with Alek. Select Alek with key 3, press X to deploy the drone, and move the drone with the arrow keys. While Alek is selected and the drone is active, the camera follows the drone and hidden zones are revealed as the drone passes over them. If the drone is not active or Alek is not selected, the arrow keys only move the camera.",
       "Clear the needed hidden zones to create a route the heroes can actually walk through. Heroes cannot pass under cloud cover; any cloud blocking the route must be revealed before they can move through it.",
+      "To capture an enemy, hover over them and click while Alyosha or Alek is selected. The hero will walk to the enemy and tie them if close enough. A tied enemy becomes arrested; hover and click the arrested enemy to have the selected hero lead them somewhere. While leading an enemy, the hero can only walk. Hover and click the escorted enemy again to leave them arrested in place.",
       "After the needed route is revealed, send Alyosha or Alek to the prison gate. Open it with E when the hero is close enough, or left-click the gate itself.",
       "Once Maya is free, bring Maya, Alyosha, and Alek back to the starting tractor. Board all three heroes into the tractor to begin the escape."
     ],

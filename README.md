@@ -22,6 +22,7 @@ The list below mirrors `CONTROL_HELP` in `src/game/config.ts`, which is rendered
 | Command | Action |
 | --- | --- |
 | Hover + click enemy | Follow the enemy and tie them if close enough |
+| Hover + click arrested enemy | Lead them with the selected hero, or leave them in place |
 | Left-click hero | Select the hero |
 | Left-click prison gate | Send the selected hero to open it |
 | Left-click terrain | Move the selected hero to that point |
@@ -132,6 +133,7 @@ Collision is not inferred from pixels.
 - `C` toggles `upright/prone`; prone movement uses crawl.
 - `Escape` stops the current movement.
 - `X` triggers the selected hero special action: Alyosha shoots toward the cursor within range, and Alek deploys or recalls his drone.
+- Tied enemies enter arrested mode; a hero can lead an arrested enemy at walking speed only, then leave them arrested in place.
 - Arrow keys pan the camera without moving a hero; Alek's deployed drone uses the same keys and pulls the camera with it.
 - Soft cloud sprites obscure world content until Alek scans them with the drone.
 - The drone clears cloud sprites persistently with the same radius as enemy vision range.

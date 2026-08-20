@@ -5,6 +5,7 @@ export interface LoadedCharacterAssets {
   manifest: MovementSpriteManifest;
   images: Record<CharacterId, HTMLImageElement>;
   enemyImage: HTMLImageElement;
+  enemyArrestedImage: HTMLImageElement;
   droneImage: HTMLImageElement;
   cloudImage: HTMLImageElement | null;
   mapImage: HTMLImageElement | null;
@@ -49,6 +50,10 @@ export class AssetLoader {
       enemyImage: await this.loadImage(
         "enemy",
         `${ASSET_BASE_PATH}${GAME_CONFIG.enemy.sprite.file}`
+      ),
+      enemyArrestedImage: await this.loadImage(
+        "enemy-arrested",
+        `${ASSET_BASE_PATH}${GAME_CONFIG.enemy.sprite.arrestedFile}`
       ),
       droneImage: await this.loadImage(
         "drone",

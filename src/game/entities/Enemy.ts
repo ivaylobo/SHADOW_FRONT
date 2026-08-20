@@ -10,12 +10,15 @@ type EnemyState =
   | "searching"
   | "shooting"
   | "dead"
-  | "bound";
+  | "bound"
+  | "arrested"
+  | "escorted";
 
 export interface EnemyOptions {
   id: EnemyId;
   name: string;
   image: HTMLImageElement;
+  arrestedImage: HTMLImageElement;
   route: WorldPoint[];
   alarmRoute?: WorldPoint[];
 }
@@ -61,6 +64,7 @@ export class Enemy {
   readonly id: EnemyId;
   readonly name: string;
   readonly image: HTMLImageElement;
+  readonly arrestedImage: HTMLImageElement;
   readonly route: WorldPoint[];
   readonly alarmRoute: WorldPoint[];
 
@@ -73,6 +77,7 @@ export class Enemy {
   rescueTargetId: EnemyId | null = null;
 
   private readonly baseTexture: Texture;
+  private readonly arrestedBaseTexture: Texture;
   private readonly frameTextures = new Map<string, Texture>();
   private routeIndex = 1;
   private alarmRouteIndex = 0;
@@ -90,9 +95,11 @@ export class Enemy {
     this.id = options.id;
     this.name = options.name;
     this.image = options.image;
+    this.arrestedImage = options.arrestedImage;
     this.route = options.route.map(clonePoint);
     this.alarmRoute = (options.alarmRoute?.length ? options.alarmRoute : options.route).map(clonePoint);
     this.baseTexture = Texture.from(options.image);
+    this.arrestedBaseTexture = Texture.from(options.arrestedImage);
     this.position = clonePoint(this.route[0]);
     this.targetPosition = clonePoint(this.route[1]);
   }
@@ -105,7 +112,7 @@ export class Enemy {
       return;
     }
 
-    if (this.state === "bound") {
+    if (this.isRestrained()) {
       return;
     }
 
@@ -180,7 +187,7 @@ export class Enemy {
   }
 
   startShooting(target?: WorldPoint): void {
-    if (this.state === "dead" || this.state === "bound") {
+    if (this.state === "dead" || this.isRestrained()) {
       return;
     }
 
@@ -218,7 +225,7 @@ export class Enemy {
     if (
       this.state === "shooting" ||
       this.state === "dead" ||
-      this.state === "bound" ||
+      this.isRestrained() ||
       this.id === alertedBy
     ) {
       return;
@@ -237,7 +244,7 @@ export class Enemy {
     if (
       this.state === "shooting" ||
       this.state === "dead" ||
-      this.state === "bound" ||
+      this.isRestrained() ||
       this.id === boundEnemy.id
     ) {
       return;
@@ -267,7 +274,7 @@ export class Enemy {
   }
 
   unbind(): void {
-    if (this.state !== "bound") {
+    if (!this.isRestrained()) {
       return;
     }
 
@@ -275,7 +282,7 @@ export class Enemy {
   }
 
   startAlarmSearch(): void {
-    if (this.state === "shooting" || this.state === "dead" || this.state === "bound") {
+    if (this.state === "shooting" || this.state === "dead" || this.isRestrained()) {
       return;
     }
 
@@ -300,17 +307,106 @@ export class Enemy {
   }
 
   bind(): void {
+    this.arrest();
+  }
+
+  arrest(): void {
     if (this.state === "dead") {
       return;
     }
 
-    this.state = "bound";
+    this.state = "arrested";
     this.targetPosition = null;
     this.alertedBy = null;
     this.rescueTargetId = null;
     this.frameIndex = 0;
     this.animationElapsed = 0;
     this.stateElapsed = 0;
+  }
+
+  startEscort(): void {
+    if (!this.isStationaryArrested()) {
+      return;
+    }
+
+    this.state = "escorted";
+    this.targetPosition = null;
+    this.alertedBy = null;
+    this.rescueTargetId = null;
+    this.frameIndex = 0;
+    this.animationElapsed = 0;
+    this.stateElapsed = 0;
+  }
+
+  stopEscort(): void {
+    if (this.state !== "escorted") {
+      return;
+    }
+
+    this.state = "arrested";
+    this.targetPosition = null;
+    this.frameIndex = 0;
+    this.animationElapsed = 0;
+    this.stateElapsed = 0;
+  }
+
+  updateEscortedPosition(
+    targetPosition: WorldPoint,
+    leaderPosition: WorldPoint,
+    deltaTime: number
+  ): void {
+    if (this.state !== "escorted") {
+      return;
+    }
+
+    this.targetPosition = clonePoint(targetPosition);
+    const toTarget = {
+      x: targetPosition.x - this.position.x,
+      y: targetPosition.y - this.position.y
+    };
+    const remainingDistance = distance(this.position, targetPosition);
+    const facingTarget = remainingDistance > 0.001 ? targetPosition : leaderPosition;
+    const toFacingTarget = {
+      x: facingTarget.x - this.position.x,
+      y: facingTarget.y - this.position.y
+    };
+
+    this.direction = directionFromVector(toFacingTarget, this.direction);
+    this.facingAngle = Math.atan2(toFacingTarget.y, toFacingTarget.x);
+
+    if (remainingDistance <= GAME_CONFIG.arrivalThreshold) {
+      this.position = clonePoint(targetPosition);
+      this.frameIndex = 0;
+      this.animationElapsed = 0;
+      return;
+    }
+
+    if (remainingDistance > GAME_CONFIG.arrest.followDistance * 4) {
+      this.position = clonePoint(targetPosition);
+      this.frameIndex = 0;
+      this.animationElapsed = 0;
+      return;
+    }
+
+    const stepDistance = Math.min(GAME_CONFIG.arrest.escortSpeed * deltaTime, remainingDistance);
+    const movement = normalize(toTarget);
+    this.position = {
+      x: this.position.x + movement.x * stepDistance,
+      y: this.position.y + movement.y * stepDistance
+    };
+    this.advanceAnimation("walk", GAME_CONFIG.enemy.walkFps, deltaTime);
+  }
+
+  isRestrained(): boolean {
+    return this.state === "bound" || this.state === "arrested" || this.state === "escorted";
+  }
+
+  isStationaryArrested(): boolean {
+    return this.state === "bound" || this.state === "arrested";
+  }
+
+  isEscorted(): boolean {
+    return this.state === "escorted";
   }
 
   getVision(): EnemyVision {
@@ -373,7 +469,7 @@ export class Enemy {
 
     container.addChild(graphics);
 
-    const sprite = new Sprite(this.getFrameTexture(source));
+    const sprite = new Sprite(this.getFrameTexture(source, this.usesArrestedSprite()));
     sprite.anchor.set(0.5, 1);
     sprite.position.set(this.position.x, this.position.y);
     sprite.scale.set(
@@ -415,7 +511,7 @@ export class Enemy {
         : "walk";
     const rowRule = ROW_OFFSETS[this.direction];
     const row =
-      this.state === "bound"
+      this.isStationaryArrested()
         ? ENEMY_SHEET.boundRow
         : this.state === "shooting"
           ? ENEMY_SHEET.shootRow
@@ -526,7 +622,7 @@ export class Enemy {
       return;
     }
 
-    const sprite = new Sprite(this.getFrameTexture(source));
+    const sprite = new Sprite(this.getFrameTexture(source, false));
     sprite.anchor.set(0.5, 1);
     sprite.position.set(this.position.x, this.position.y);
     sprite.scale.set(
@@ -554,21 +650,26 @@ export class Enemy {
     );
   }
 
+  private usesArrestedSprite(): boolean {
+    return this.state === "bound" || this.state === "arrested" || this.state === "escorted";
+  }
+
   private getFrameTexture(source: {
     x: number;
     y: number;
     width: number;
     height: number;
-  }): Texture {
-    const key = `${source.x}:${source.y}:${source.width}:${source.height}`;
+  }, arrested: boolean): Texture {
+    const key = `${arrested ? "arrested" : "normal"}:${source.x}:${source.y}:${source.width}:${source.height}`;
     const cached = this.frameTextures.get(key);
 
     if (cached) {
       return cached;
     }
 
+    const baseTexture = arrested ? this.arrestedBaseTexture : this.baseTexture;
     const texture = new Texture({
-      source: this.baseTexture.source,
+      source: baseTexture.source,
       frame: new Rectangle(source.x, source.y, source.width, source.height)
     });
     this.frameTextures.set(key, texture);

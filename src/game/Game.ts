@@ -98,6 +98,12 @@ interface VehicleBoardAttempt {
   objectId: string;
 }
 
+interface EnemyEscortAttempt {
+  enemyId: EnemyId;
+}
+
+type EnemyEscortPromptMode = "lead" | "release";
+
 type DoorRuntimeStatus = "closed" | "opening" | "open";
 
 interface DoorRuntimeState {
@@ -198,6 +204,9 @@ export class Game {
   private readonly tieAttempts = new Map<CharacterId, TieAttempt>();
   private readonly doorOpenAttempts = new Map<CharacterId, DoorOpenAttempt>();
   private readonly vehicleBoardAttempts = new Map<CharacterId, VehicleBoardAttempt>();
+  private readonly enemyEscortAttempts = new Map<CharacterId, EnemyEscortAttempt>();
+  private readonly escortedEnemies = new Map<CharacterId, EnemyId>();
+  private readonly enemyEscorts = new Map<EnemyId, CharacterId>();
   private readonly characterVehicles = new Map<CharacterId, string>();
   private readonly vehicleOccupants = new Map<string, Set<CharacterId>>();
   private readonly doorStates = new Map<string, DoorRuntimeState>();
@@ -269,6 +278,7 @@ export class Game {
               id: patrol.id,
               name: patrol.name,
               image: assets.enemyImage,
+              arrestedImage: assets.enemyArrestedImage,
               route: patrol.route,
               alarmRoute: patrol.alarmRoute
             })
@@ -417,6 +427,9 @@ export class Game {
     this.objectFrameTextures.clear();
     this.doorStates.clear();
     this.vehicleBoardAttempts.clear();
+    this.enemyEscortAttempts.clear();
+    this.escortedEnemies.clear();
+    this.enemyEscorts.clear();
     this.characterVehicles.clear();
     this.vehicleOccupants.clear();
 
@@ -476,6 +489,7 @@ export class Game {
     }
 
     this.syncTieAttemptTargets();
+    this.syncEnemyEscortAttemptTargets();
     this.syncDoorOpenAttemptTargets();
     this.syncVehicleBoardAttemptTargets();
 
@@ -486,6 +500,9 @@ export class Game {
         );
       }
     }
+
+    this.updateEnemyEscortAttempts();
+    this.updateEnemyEscorts(deltaTime);
 
     for (const enemy of this.enemies.values()) {
       enemy.update(deltaTime, (position, radius) =>
@@ -655,6 +672,7 @@ export class Game {
     this.drawSortedRenderables();
     this.drawSpecialEffects();
     this.drawTiePrompts();
+    this.drawEnemyEscortPrompts();
     this.drawDoorOpenPrompts();
     this.drawVehiclePrompts();
     this.drawCloudZones();
@@ -693,6 +711,7 @@ export class Game {
         this.tieAttempts.delete(clickedCharacter.id);
         this.doorOpenAttempts.delete(clickedCharacter.id);
         this.vehicleBoardAttempts.delete(clickedCharacter.id);
+        this.enemyEscortAttempts.delete(clickedCharacter.id);
       }
       return;
     }
@@ -708,6 +727,7 @@ export class Game {
       this.tieAttempts.delete(selectedCharacter.id);
       this.doorOpenAttempts.delete(selectedCharacter.id);
       this.vehicleBoardAttempts.delete(selectedCharacter.id);
+      this.enemyEscortAttempts.delete(selectedCharacter.id);
       this.aimTargets.delete(selectedCharacter.id);
 
       if (!this.handleVehicleCommand(selectedCharacter, clickedVehicleObject)) {
@@ -727,9 +747,33 @@ export class Game {
     const clickedEnemy = this.findEnemyAt(command.worldPosition);
 
     if (clickedEnemy) {
+      const escortMode = this.getEnemyEscortPromptMode(selectedCharacter, clickedEnemy);
+      if (escortMode) {
+        this.cameraMode = "follow-selected";
+        this.tieAttempts.delete(selectedCharacter.id);
+        this.doorOpenAttempts.delete(selectedCharacter.id);
+        this.vehicleBoardAttempts.delete(selectedCharacter.id);
+        this.enemyEscortAttempts.delete(selectedCharacter.id);
+        this.aimTargets.delete(selectedCharacter.id);
+
+        if (!this.handleEnemyEscortCommand(selectedCharacter, clickedEnemy, escortMode)) {
+          this.addMarker(clickedEnemy.position, "invalid");
+          return;
+        }
+
+        this.addMarker(clickedEnemy.position, "target");
+        return;
+      }
+
+      if (this.isCharacterEscortingEnemy(selectedCharacter)) {
+        this.addMarker(clickedEnemy.position, "invalid");
+        return;
+      }
+
       this.cameraMode = "follow-selected";
       this.doorOpenAttempts.delete(selectedCharacter.id);
       this.vehicleBoardAttempts.delete(selectedCharacter.id);
+      this.enemyEscortAttempts.delete(selectedCharacter.id);
       this.aimTargets.set(selectedCharacter.id, clickedEnemy.id);
 
       if (!this.startTieAttempt(selectedCharacter, clickedEnemy)) {
@@ -746,6 +790,7 @@ export class Game {
       this.cameraMode = "follow-selected";
       this.tieAttempts.delete(selectedCharacter.id);
       this.vehicleBoardAttempts.delete(selectedCharacter.id);
+      this.enemyEscortAttempts.delete(selectedCharacter.id);
       this.aimTargets.delete(selectedCharacter.id);
 
       if (!this.startDoorOpenAttempt(selectedCharacter, clickedDoorObject)) {
@@ -758,9 +803,14 @@ export class Game {
     }
 
     const requestedMotion: TerrainMotion =
-      command.shiftKey || command.isDoubleClick ? "run" : "walk";
+      this.isCharacterEscortingEnemy(selectedCharacter) || !(command.shiftKey || command.isDoubleClick)
+        ? "walk"
+        : "run";
+    const speedOverride = this.isCharacterEscortingEnemy(selectedCharacter)
+      ? GAME_CONFIG.arrest.escortSpeed
+      : null;
 
-    if (!this.moveCharacterTo(selectedCharacter, command.worldPosition, requestedMotion)) {
+    if (!this.moveCharacterTo(selectedCharacter, command.worldPosition, requestedMotion, speedOverride)) {
       this.addMarker(command.worldPosition, "invalid");
       return;
     }
@@ -768,6 +818,7 @@ export class Game {
     this.tieAttempts.delete(selectedCharacter.id);
     this.doorOpenAttempts.delete(selectedCharacter.id);
     this.vehicleBoardAttempts.delete(selectedCharacter.id);
+    this.enemyEscortAttempts.delete(selectedCharacter.id);
     this.aimTargets.delete(selectedCharacter.id);
     this.cameraMode = "follow-selected";
     this.addMarker(command.worldPosition, "target");
@@ -780,6 +831,7 @@ export class Game {
       character.isDead() ||
       character.isBound() ||
       this.isCharacterInVehicle(character) ||
+      this.isCharacterEscortingEnemy(character) ||
       (character.state.action && character.state.action !== "shoot")
     ) {
       this.logCombat("player shot blocked", {
@@ -787,6 +839,7 @@ export class Game {
         dead: character.isDead(),
         bound: character.isBound(),
         inVehicle: this.isCharacterInVehicle(character),
+        escorting: this.isCharacterEscortingEnemy(character),
         action: character.state.action
       });
       return;
@@ -796,6 +849,7 @@ export class Game {
     this.tieAttempts.delete(character.id);
     this.doorOpenAttempts.delete(character.id);
     this.vehicleBoardAttempts.delete(character.id);
+    this.enemyEscortAttempts.delete(character.id);
 
     if (character.id === "alek") {
       this.toggleDrone(character);
@@ -854,6 +908,7 @@ export class Game {
     if (killed) {
       this.clearAimTarget(shotHit.enemy.id);
       this.enemyShotStates.delete(shotHit.enemy.id);
+      this.stopEnemyEscortByEnemyId(shotHit.enemy.id);
     } else {
       this.aimTargets.set(character.id, shotHit.enemy.id);
       this.startEnemyShooting(shotHit.enemy, character, "hit-by-player");
@@ -950,6 +1005,10 @@ export class Game {
 
     if (normalizedKey === "c" || code === "KeyC") {
       const character = this.getSelectedCharacter();
+      if (this.isCharacterEscortingEnemy(character)) {
+        this.addMarker(character.state.position, "invalid");
+        return;
+      }
       if (!this.isCharacterInVehicle(character)) {
         character.toggleStance();
       }
@@ -958,6 +1017,11 @@ export class Game {
 
     if (normalizedKey === "e" || code === "KeyE") {
       if (repeat) {
+        return;
+      }
+
+      if (this.isCharacterEscortingEnemy(this.getSelectedCharacter())) {
+        this.addMarker(this.getSelectedCharacter().state.position, "invalid");
         return;
       }
 
@@ -987,6 +1051,7 @@ export class Game {
       this.tieAttempts.delete(character.id);
       this.doorOpenAttempts.delete(character.id);
       this.vehicleBoardAttempts.delete(character.id);
+      this.enemyEscortAttempts.delete(character.id);
       this.aimTargets.delete(character.id);
       this.droneInput.clear();
       this.cameraInput.clear();
@@ -1197,14 +1262,14 @@ export class Game {
   private updateAimTargetFromPoint(point: WorldPoint): void {
     const selectedCharacter = this.getSelectedCharacter();
 
-    if (this.isCharacterInVehicle(selectedCharacter)) {
+    if (this.isCharacterInVehicle(selectedCharacter) || this.isCharacterEscortingEnemy(selectedCharacter)) {
       this.aimTargets.delete(selectedCharacter.id);
       return;
     }
 
     const enemy = this.findEnemyAt(point);
 
-    if (enemy && !enemy.isDead()) {
+    if (enemy && !enemy.isDead() && !enemy.isRestrained()) {
       this.aimTargets.set(selectedCharacter.id, enemy.id);
       return;
     }
@@ -1238,12 +1303,30 @@ export class Game {
   }
 
   private getHoveredTieEnemy(): Enemy | null {
-    if (!this.cursorWorld || this.findCharacterAt(this.cursorWorld)) {
+    if (
+      !this.cursorWorld ||
+      this.findCharacterAt(this.cursorWorld) ||
+      this.isCharacterEscortingEnemy(this.getSelectedCharacter())
+    ) {
       return null;
     }
 
     const enemy = this.findEnemyAt(this.cursorWorld);
     return enemy && !this.isEnemyUnavailableForTie(enemy) ? enemy : null;
+  }
+
+  private getHoveredEnemyEscortPrompt(): { enemy: Enemy; mode: EnemyEscortPromptMode } | null {
+    if (!this.cursorWorld || this.findCharacterAt(this.cursorWorld)) {
+      return null;
+    }
+
+    const enemy = this.findEnemyAt(this.cursorWorld);
+    if (!enemy) {
+      return null;
+    }
+
+    const mode = this.getEnemyEscortPromptMode(this.getSelectedCharacter(), enemy);
+    return mode ? { enemy, mode } : null;
   }
 
   private getHoveredDoorObject(): PlacedLevelObject | null {
@@ -1283,7 +1366,10 @@ export class Game {
 
   private updateCanvasCursor(): void {
     this.canvas.style.cursor =
-      this.getHoveredTieEnemy() || this.getHoveredDoorObject() || this.getHoveredVehiclePrompt()
+      this.getHoveredTieEnemy() ||
+      this.getHoveredEnemyEscortPrompt() ||
+      this.getHoveredDoorObject() ||
+      this.getHoveredVehiclePrompt()
         ? "pointer"
         : "crosshair";
   }
@@ -1567,7 +1653,12 @@ export class Game {
   }
 
   private startTieAttempt(character: Character, enemy: Enemy): boolean {
-    if (character.isDead() || character.isBound() || this.isCharacterInVehicle(character)) {
+    if (
+      character.isDead() ||
+      character.isBound() ||
+      this.isCharacterInVehicle(character) ||
+      this.isCharacterEscortingEnemy(character)
+    ) {
       return false;
     }
 
@@ -1584,6 +1675,7 @@ export class Game {
     });
     this.doorOpenAttempts.delete(character.id);
     this.vehicleBoardAttempts.delete(character.id);
+    this.enemyEscortAttempts.delete(character.id);
 
     character.setTarget(enemy.position, "walk", GAME_CONFIG.tie.walkSpeed);
     return true;
@@ -1649,6 +1741,266 @@ export class Game {
     }
   }
 
+  private handleEnemyEscortCommand(
+    character: Character,
+    enemy: Enemy,
+    mode: EnemyEscortPromptMode
+  ): boolean {
+    if (mode === "release") {
+      return this.stopEnemyEscort(character, enemy);
+    }
+
+    return this.startEnemyEscortAttempt(character, enemy);
+  }
+
+  private startEnemyEscortAttempt(character: Character, enemy: Enemy): boolean {
+    if (!this.canStartEnemyEscortAttempt(character, enemy)) {
+      return false;
+    }
+
+    this.tieAttempts.delete(character.id);
+    this.doorOpenAttempts.delete(character.id);
+    this.vehicleBoardAttempts.delete(character.id);
+    this.enemyEscortAttempts.delete(character.id);
+    this.aimTargets.delete(character.id);
+
+    if (this.tryCompleteEnemyEscortAttempt(character, enemy)) {
+      return true;
+    }
+
+    if (
+      !this.moveCharacterTo(
+        character,
+        this.getEnemyEscortStandPoint(character, enemy),
+        "walk",
+        GAME_CONFIG.arrest.escortSpeed
+      )
+    ) {
+      return false;
+    }
+
+    this.enemyEscortAttempts.set(character.id, {
+      enemyId: enemy.id
+    });
+    return true;
+  }
+
+  private syncEnemyEscortAttemptTargets(): void {
+    for (const [characterId, attempt] of this.enemyEscortAttempts) {
+      const character = this.characters.get(characterId);
+      const enemy = this.enemies.get(attempt.enemyId);
+
+      if (!character || !enemy) {
+        this.enemyEscortAttempts.delete(characterId);
+        continue;
+      }
+
+      if (
+        character.state.action ||
+        character.isBound() ||
+        character.state.stance !== "upright" ||
+        !character.state.targetPosition ||
+        !this.canStartEnemyEscortAttempt(character, enemy)
+      ) {
+        character.stop();
+        this.enemyEscortAttempts.delete(characterId);
+        continue;
+      }
+
+      character.retarget(this.getEnemyEscortStandPoint(character, enemy));
+    }
+  }
+
+  private updateEnemyEscortAttempts(): void {
+    for (const [characterId, attempt] of this.enemyEscortAttempts) {
+      const character = this.characters.get(characterId);
+      const enemy = this.enemies.get(attempt.enemyId);
+
+      if (!character || !enemy) {
+        this.enemyEscortAttempts.delete(characterId);
+        continue;
+      }
+
+      if (!this.canStartEnemyEscortAttempt(character, enemy)) {
+        character.stop();
+        this.enemyEscortAttempts.delete(characterId);
+        continue;
+      }
+
+      if (this.tryCompleteEnemyEscortAttempt(character, enemy)) {
+        this.enemyEscortAttempts.delete(characterId);
+        continue;
+      }
+
+      if (!character.state.targetPosition) {
+        this.enemyEscortAttempts.delete(characterId);
+      }
+    }
+  }
+
+  private tryCompleteEnemyEscortAttempt(character: Character, enemy: Enemy): boolean {
+    if (!this.canStartEnemyEscortAttempt(character, enemy)) {
+      return false;
+    }
+
+    if (
+      distanceSquared(character.state.position, enemy.position) >
+      GAME_CONFIG.arrest.leadRange * GAME_CONFIG.arrest.leadRange
+    ) {
+      return false;
+    }
+
+    if (!this.hasTieLineOfSight(character, enemy)) {
+      return false;
+    }
+
+    this.beginEnemyEscort(character, enemy);
+    return true;
+  }
+
+  private beginEnemyEscort(character: Character, enemy: Enemy): void {
+    this.stopEnemyEscort(character);
+    this.stopEnemyEscortByEnemyId(enemy.id);
+    enemy.startEscort();
+    this.escortedEnemies.set(character.id, enemy.id);
+    this.enemyEscorts.set(enemy.id, character.id);
+    this.enemyEscortAttempts.delete(character.id);
+    this.tieAttempts.delete(character.id);
+    this.doorOpenAttempts.delete(character.id);
+    this.vehicleBoardAttempts.delete(character.id);
+    this.aimTargets.delete(character.id);
+    enemy.updateEscortedPosition(this.getEnemyEscortFollowPoint(character), character.state.position, 0);
+  }
+
+  private updateEnemyEscorts(deltaTime: number): void {
+    for (const [characterId, enemyId] of [...this.escortedEnemies]) {
+      const character = this.characters.get(characterId);
+      const enemy = this.enemies.get(enemyId);
+
+      if (!character || !enemy || !enemy.isEscorted()) {
+        this.clearEnemyEscort(characterId, enemyId);
+        continue;
+      }
+
+      if (
+        character.isDead() ||
+        character.isBound() ||
+        this.isCharacterInVehicle(character) ||
+        character.state.action
+      ) {
+        this.stopEnemyEscort(character, enemy);
+        continue;
+      }
+
+      if (character.state.stance !== "upright") {
+        character.state.stance = "upright";
+      }
+
+      enemy.updateEscortedPosition(
+        this.getEnemyEscortFollowPoint(character),
+        character.state.position,
+        deltaTime
+      );
+    }
+  }
+
+  private stopEnemyEscort(character: Character, expectedEnemy: Enemy | null = null): boolean {
+    const enemyId = this.escortedEnemies.get(character.id);
+    if (!enemyId || (expectedEnemy && expectedEnemy.id !== enemyId)) {
+      return false;
+    }
+
+    const enemy = this.enemies.get(enemyId);
+    this.clearEnemyEscort(character.id, enemyId);
+    if (enemy?.isEscorted()) {
+      enemy.stopEscort();
+    }
+    return true;
+  }
+
+  private stopEnemyEscortByEnemyId(enemyId: EnemyId): void {
+    const characterId = this.enemyEscorts.get(enemyId);
+    if (characterId) {
+      this.clearEnemyEscort(characterId, enemyId);
+    }
+
+    const enemy = this.enemies.get(enemyId);
+    if (enemy?.isEscorted()) {
+      enemy.stopEscort();
+    }
+  }
+
+  private clearEnemyEscort(characterId: CharacterId, enemyId: EnemyId): void {
+    this.escortedEnemies.delete(characterId);
+    this.enemyEscorts.delete(enemyId);
+
+    for (const [attemptCharacterId, attempt] of this.enemyEscortAttempts) {
+      if (attemptCharacterId === characterId || attempt.enemyId === enemyId) {
+        this.enemyEscortAttempts.delete(attemptCharacterId);
+      }
+    }
+  }
+
+  private canStartEnemyEscortAttempt(character: Character, enemy: Enemy): boolean {
+    return (
+      enemy.isStationaryArrested() &&
+      !this.enemyEscorts.has(enemy.id) &&
+      !this.isCharacterEscortingEnemy(character) &&
+      !character.isDead() &&
+      !character.isBound() &&
+      !this.isCharacterInVehicle(character) &&
+      character.state.stance === "upright" &&
+      !character.state.action
+    );
+  }
+
+  private getEnemyEscortPromptMode(
+    character: Character,
+    enemy: Enemy
+  ): EnemyEscortPromptMode | null {
+    if (enemy.isEscorted() && this.enemyEscorts.get(enemy.id) === character.id) {
+      return "release";
+    }
+
+    return this.canStartEnemyEscortAttempt(character, enemy) ? "lead" : null;
+  }
+
+  private isCharacterEscortingEnemy(character: Character): boolean {
+    return this.escortedEnemies.has(character.id);
+  }
+
+  private getEnemyEscortStandPoint(character: Character, enemy: Enemy): WorldPoint {
+    const candidates = [
+      { x: -34, y: 22 },
+      { x: 34, y: 22 },
+      { x: -38, y: -12 },
+      { x: 38, y: -12 },
+      { x: 0, y: 38 }
+    ];
+
+    for (const offset of candidates) {
+      const point = {
+        x: enemy.position.x + offset.x,
+        y: enemy.position.y + offset.y
+      };
+
+      if (this.isCharacterPositionWalkable(character, point)) {
+        return point;
+      }
+    }
+
+    return { ...enemy.position };
+  }
+
+  private getEnemyEscortFollowPoint(character: Character): WorldPoint {
+    const direction = this.getDirectionVector(character.state.direction);
+
+    return {
+      x: character.state.position.x - direction.x * GAME_CONFIG.arrest.followDistance,
+      y: character.state.position.y - direction.y * GAME_CONFIG.arrest.followDistance
+    };
+  }
+
   private triggerSelectedDoorOpen(): void {
     const character = this.getSelectedCharacter();
     const object = this.findNearestOpenableDoorInRange(character);
@@ -1665,6 +2017,7 @@ export class Game {
 
     this.tieAttempts.delete(character.id);
     this.vehicleBoardAttempts.delete(character.id);
+    this.enemyEscortAttempts.delete(character.id);
     this.aimTargets.delete(character.id);
 
     if (this.tryCompleteDoorOpen(character, object)) {
@@ -1754,6 +2107,7 @@ export class Game {
     this.tieAttempts.delete(character.id);
     this.doorOpenAttempts.delete(character.id);
     this.vehicleBoardAttempts.delete(character.id);
+    this.enemyEscortAttempts.delete(character.id);
     this.aimTargets.delete(character.id);
 
     if (this.tryCompleteVehicleBoard(character, object)) {
@@ -1836,6 +2190,7 @@ export class Game {
         !character.isDead() &&
         !character.isBound() &&
         !this.isCharacterInVehicle(character) &&
+        !this.isCharacterEscortingEnemy(character) &&
         character.state.stance === "upright" &&
         !character.state.action
     );
@@ -1867,6 +2222,7 @@ export class Game {
     this.vehicleBoardAttempts.delete(character.id);
     this.tieAttempts.delete(character.id);
     this.doorOpenAttempts.delete(character.id);
+    this.enemyEscortAttempts.delete(character.id);
     this.aimTargets.delete(character.id);
     if (character.state.selected) {
       this.droneInput.clear();
@@ -2145,6 +2501,9 @@ export class Game {
     this.tieAttempts.clear();
     this.doorOpenAttempts.clear();
     this.vehicleBoardAttempts.clear();
+    this.enemyEscortAttempts.clear();
+    this.escortedEnemies.clear();
+    this.enemyEscorts.clear();
     this.aimTargets.clear();
     this.enemyShotStates.clear();
     this.pendingDroneShot = null;
@@ -2264,6 +2623,9 @@ export class Game {
     this.enemyShotStates.clear();
     this.doorOpenAttempts.clear();
     this.vehicleBoardAttempts.clear();
+    this.enemyEscortAttempts.clear();
+    this.escortedEnemies.clear();
+    this.enemyEscorts.clear();
     this.pendingDroneShot = null;
     this.loop.stop();
     window.setTimeout(() => this.showLevelCompletePrompt(), 0);
@@ -2288,6 +2650,7 @@ export class Game {
       character.isDead() ||
       character.isBound() ||
       this.isCharacterInVehicle(character) ||
+      this.isCharacterEscortingEnemy(character) ||
       character.state.stance !== "upright" ||
       character.state.action ||
       this.isDoorOpenOrOpening(object)
@@ -2360,7 +2723,7 @@ export class Game {
   }
 
   private isEnemyUnavailableForTie(enemy: Enemy): boolean {
-    return enemy.state === "shooting" || enemy.state === "dead" || enemy.state === "bound";
+    return enemy.state === "shooting" || enemy.state === "dead" || enemy.isRestrained();
   }
 
   private hasTieLineOfSight(character: Character, enemy: Enemy): boolean {
@@ -2426,7 +2789,7 @@ export class Game {
   }
 
   private startEnemyShooting(enemy: Enemy, target: Character, reason: string): void {
-    if (enemy.isDead() || target.isDead() || target.isBound()) {
+    if (enemy.isDead() || enemy.isRestrained() || target.isDead() || target.isBound()) {
       return;
     }
 
@@ -2477,7 +2840,7 @@ export class Game {
   private canEnemyShootCharacter(enemy: Enemy, character: Character): boolean {
     if (
       enemy.isDead() ||
-      enemy.state === "bound" ||
+      enemy.isRestrained() ||
       character.isDead() ||
       character.isBound() ||
       this.isCharacterHiddenFromEnemies(character)
@@ -2529,7 +2892,7 @@ export class Game {
       if (
         enemy.state === "shooting" ||
         enemy.state === "dead" ||
-        enemy.state === "bound"
+        enemy.isRestrained()
       ) {
         continue;
       }
@@ -2556,7 +2919,7 @@ export class Game {
     }
 
     for (const enemy of this.enemies.values()) {
-      if (enemy.state === "dead" || enemy.state === "bound") {
+      if (enemy.state === "dead" || enemy.isRestrained()) {
         continue;
       }
 
@@ -2592,7 +2955,7 @@ export class Game {
     const drone = this.drone;
     const enemy = this.enemies.get(this.pendingDroneShot.enemyId);
 
-    if (!drone?.isDeployed() || !enemy || enemy.state === "dead" || enemy.state === "bound") {
+    if (!drone?.isDeployed() || !enemy || enemy.state === "dead" || enemy.isRestrained()) {
       this.pendingDroneShot = null;
       return;
     }
@@ -2676,7 +3039,7 @@ export class Game {
     for (const enemy of this.enemies.values()) {
       if (
         enemy.id !== watcher.id &&
-        enemy.state === "bound" &&
+        enemy.isStationaryArrested() &&
         this.getEnemyVisionDistance(watcher, this.getEnemyTiePoint(enemy)) !== null
       ) {
         return enemy;
@@ -2728,7 +3091,7 @@ export class Game {
       }
 
       const boundEnemy = this.enemies.get(rescuer.rescueTargetId);
-      if (!boundEnemy || boundEnemy.state !== "bound") {
+      if (!boundEnemy || !boundEnemy.isStationaryArrested()) {
         rescuer.completeRescue();
         continue;
       }
@@ -2743,6 +3106,7 @@ export class Game {
       }
 
       boundEnemy.unbind();
+      this.stopEnemyEscortByEnemyId(boundEnemy.id);
       rescuer.completeRescue();
       this.startAlarmSearch();
     }
@@ -2863,6 +3227,8 @@ export class Game {
       this.tieAttempts.delete(character.id);
       this.doorOpenAttempts.delete(character.id);
       this.vehicleBoardAttempts.delete(character.id);
+      this.enemyEscortAttempts.delete(character.id);
+      this.stopEnemyEscort(character);
       this.aimTargets.delete(character.id);
       this.endGame(character, source);
     }
@@ -3452,6 +3818,52 @@ export class Game {
     }
   }
 
+  private drawEnemyEscortPrompts(): void {
+    const prompts = new Map<
+      EnemyId,
+      { enemy: Enemy; mode: EnemyEscortPromptMode; hovered: boolean }
+    >();
+    const selectedCharacter = this.getSelectedCharacter();
+    const hoveredPrompt = this.getHoveredEnemyEscortPrompt();
+
+    if (hoveredPrompt) {
+      prompts.set(hoveredPrompt.enemy.id, {
+        enemy: hoveredPrompt.enemy,
+        mode: hoveredPrompt.mode,
+        hovered: true
+      });
+    }
+
+    for (const enemy of this.enemies.values()) {
+      const mode = this.getEnemyEscortPromptMode(selectedCharacter, enemy);
+      if (!mode) {
+        continue;
+      }
+
+      prompts.set(enemy.id, {
+        enemy,
+        mode,
+        hovered: prompts.get(enemy.id)?.hovered ?? false
+      });
+    }
+
+    for (const [characterId, attempt] of this.enemyEscortAttempts) {
+      const character = this.characters.get(characterId);
+      const enemy = this.enemies.get(attempt.enemyId);
+      if (character && enemy && this.canStartEnemyEscortAttempt(character, enemy)) {
+        prompts.set(enemy.id, {
+          enemy,
+          mode: "lead",
+          hovered: prompts.get(enemy.id)?.hovered ?? false
+        });
+      }
+    }
+
+    for (const prompt of prompts.values()) {
+      this.drawEnemyEscortPrompt(prompt.enemy, prompt.mode, prompt.hovered);
+    }
+  }
+
   private drawDoorOpenPrompts(): void {
     const prompts = new Map<string, { object: PlacedLevelObject; hovered: boolean }>();
     const selectedCharacter = this.getSelectedCharacter();
@@ -3662,6 +4074,59 @@ export class Game {
     this.renderer.layers.prompts.addChild(graphics);
   }
 
+  private drawEnemyEscortPrompt(
+    enemy: Enemy,
+    mode: EnemyEscortPromptMode,
+    hovered: boolean
+  ): void {
+    const position = enemy.getOverheadPoint();
+    const blink = 0.5 + Math.sin(this.elapsedTime * Math.PI * 4.8) * 0.5;
+    const bob = Math.sin(this.elapsedTime * Math.PI * 2.15) * 2;
+    const alpha = hovered ? 0.38 + blink * 0.62 : 0.5 + blink * 0.2;
+    const graphics = new Graphics();
+
+    graphics.position.set(position.x, position.y + bob);
+    graphics.alpha = alpha;
+    this.strokeEnemyEscortIcon(graphics, mode, "#080a07", 6, 0.86);
+    this.strokeEnemyEscortIcon(graphics, mode, mode === "lead" ? "#bfe7ff" : "#eadba8", 2.7);
+    this.renderer.layers.prompts.addChild(graphics);
+  }
+
+  private strokeEnemyEscortIcon(
+    graphics: Graphics,
+    mode: EnemyEscortPromptMode,
+    color: string,
+    width: number,
+    alpha = 1
+  ): void {
+    graphics
+      .circle(-8, -9, 6)
+      .moveTo(-8, -3)
+      .lineTo(-8, 12)
+      .moveTo(-18, 2)
+      .lineTo(2, 2)
+      .moveTo(-14, 25)
+      .lineTo(-8, 12)
+      .lineTo(-2, 25);
+
+    if (mode === "lead") {
+      graphics
+        .moveTo(6, 3)
+        .lineTo(20, 3)
+        .moveTo(13, -4)
+        .lineTo(21, 3)
+        .lineTo(13, 10);
+    } else {
+      graphics
+        .moveTo(6, -8)
+        .lineTo(20, 6)
+        .moveTo(20, -8)
+        .lineTo(6, 6);
+    }
+
+    graphics.stroke({ color, alpha, width, cap: "round", join: "round" });
+  }
+
   private strokeRopeIcon(graphics: Graphics, color: string, width: number, alpha = 1): void {
     graphics
       .ellipse(-8, 0, 8, 11)
@@ -3678,7 +4143,7 @@ export class Game {
     this.renderer.layers.vision.addChild(graphics);
 
     for (const enemy of this.enemies.values()) {
-      if (enemy.state === "dead" || enemy.state === "bound") {
+      if (enemy.state === "dead" || enemy.isRestrained()) {
         continue;
       }
 
