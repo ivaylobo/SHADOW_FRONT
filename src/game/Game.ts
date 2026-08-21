@@ -24,6 +24,7 @@ import { InputManager, type CanvasCommand } from "./InputManager";
 import type {
   CloudZone,
   CollisionPolygon,
+  LevelDefinition,
   LevelObjectDefinition,
   ObliquePrism
 } from "./levels/LevelDefinition";
@@ -102,6 +103,16 @@ interface EnemyEscortAttempt {
   enemyId: EnemyId;
 }
 
+interface PhotoDocumentAttempt {
+  objectId: string;
+}
+
+interface PhotoDocumentCapture {
+  objectId: string;
+  characterId: CharacterId;
+  startedAt: number;
+}
+
 type EnemyEscortPromptMode = "lead" | "release";
 
 type DoorRuntimeStatus = "closed" | "opening" | "open";
@@ -141,6 +152,11 @@ interface EscapeSequence {
   elapsed: number;
 }
 
+interface GameOptions {
+  level?: LevelDefinition;
+  onLevelComplete?: (levelId: string) => void;
+}
+
 const START_TRACTOR_ID = "tractor-start";
 const START_TOWED_VEHICLE_ID = "mt-lb-start";
 const ESCAPE_CHARACTER_IDS: CharacterId[] = ["maya", "alyosha", "alek"];
@@ -163,9 +179,9 @@ interface PathNode {
 }
 
 export class Game {
-  private readonly level = testLevel;
+  private readonly level: LevelDefinition;
   private readonly assetLoader = new AssetLoader();
-  private readonly camera = new Camera(testLevel.worldSize);
+  private readonly camera: Camera;
   private readonly renderer: PixiGameRenderer;
   private readonly controlsPanel: ControlsPanel;
   private readonly loop = new GameLoop();
@@ -181,6 +197,7 @@ export class Game {
   private droneImage: HTMLImageElement | null = null;
   private cloudTexture: Texture | null = null;
   private mapTexture: Texture | null = null;
+  private waterTextures: Texture[] = [];
   private readonly objectTextures = new Map<string, Texture>();
   private readonly objectFrameTextures = new Map<string, Texture>();
   private drone: Drone | null = null;
@@ -205,19 +222,25 @@ export class Game {
   private readonly doorOpenAttempts = new Map<CharacterId, DoorOpenAttempt>();
   private readonly vehicleBoardAttempts = new Map<CharacterId, VehicleBoardAttempt>();
   private readonly enemyEscortAttempts = new Map<CharacterId, EnemyEscortAttempt>();
+  private readonly photoDocumentAttempts = new Map<CharacterId, PhotoDocumentAttempt>();
   private readonly escortedEnemies = new Map<CharacterId, EnemyId>();
   private readonly enemyEscorts = new Map<EnemyId, CharacterId>();
   private readonly characterVehicles = new Map<CharacterId, string>();
   private readonly vehicleOccupants = new Map<string, Set<CharacterId>>();
   private readonly doorStates = new Map<string, DoorRuntimeState>();
   private readonly aimTargets = new Map<CharacterId, EnemyId>();
+  private readonly photographedDocuments = new Set<string>();
   private readonly enemyShotStates = new Map<EnemyId, EnemyShotState>();
   private pendingDroneShot: DroneShotState | null = null;
+  private photoDocumentCapture: PhotoDocumentCapture | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
-    sidePanel: HTMLElement
+    sidePanel: HTMLElement,
+    private readonly options: GameOptions = {}
   ) {
+    this.level = options.level ?? testLevel;
+    this.camera = new Camera(this.level.worldSize);
     this.renderer = new PixiGameRenderer(canvas);
     this.controlsPanel = new ControlsPanel(sidePanel);
     this.controlsPanel.setLevelDescription(this.level.description);
@@ -237,7 +260,8 @@ export class Game {
       const animator = new SpriteAnimator(assets.manifest);
       this.droneImage = assets.droneImage;
       this.cloudTexture = this.createCloudTexture(assets.cloudImage);
-      this.mapTexture = assets.mapImage ? Texture.from(assets.mapImage) : null;
+      this.mapTexture = assets.mapImage ? this.createMapTexture(assets.mapImage) : null;
+      this.waterTextures = this.level.animatedWater ? this.createWaterTextures() : [];
       this.initializeLevelObjects(assets.objectImages);
 
       this.characters.set(
@@ -315,6 +339,117 @@ export class Game {
 
   private createCloudTexture(image: HTMLImageElement | null): Texture {
     return Texture.from(image ? this.createCloudCanvas(image) : this.createFallbackCloudCanvas());
+  }
+
+  private createMapTexture(image: HTMLImageElement): Texture {
+    if (!this.level.animatedWater) {
+      return Texture.from(image);
+    }
+
+    return Texture.from(this.createWaterCutoutMapCanvas(image));
+  }
+
+  private createWaterCutoutMapCanvas(image: HTMLImageElement): HTMLCanvasElement {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, image.naturalWidth || image.width);
+    canvas.height = Math.max(1, image.naturalHeight || image.height);
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("Cannot create map texture context.");
+    }
+
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+
+    for (let y = 0; y < canvas.height; y += 1) {
+      for (let x = 0; x < canvas.width; x += 1) {
+        const index = (y * canvas.width + x) * 4;
+        if (
+          this.isWaterPlaceholderPixel(
+            imageData.data[index],
+            imageData.data[index + 1],
+            imageData.data[index + 2],
+            imageData.data[index + 3]
+          )
+        ) {
+          imageData.data[index + 3] = 0;
+        }
+      }
+    }
+
+    context.putImageData(imageData, 0, 0);
+    return canvas;
+  }
+
+  private isWaterPlaceholderPixel(red: number, green: number, blue: number, alpha: number): boolean {
+    if (alpha < 250) {
+      return true;
+    }
+
+    const maxChannel = Math.max(red, green, blue);
+    const minChannel = Math.min(red, green, blue);
+    const brightness = (red + green + blue) / 3;
+
+    return brightness >= 185 && maxChannel - minChannel <= 14;
+  }
+
+  private createWaterTextures(): Texture[] {
+    const water = this.level.animatedWater;
+    if (!water) {
+      return [];
+    }
+
+    return Array.from({ length: 8 }, (_, frameIndex) => {
+      const size = 512;
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const context = canvas.getContext("2d");
+
+      if (!context) {
+        throw new Error("Cannot create water texture context.");
+      }
+
+      context.fillStyle = water.baseColor;
+      context.fillRect(0, 0, size, size);
+
+      const gradient = context.createLinearGradient(0, 0, size, size);
+      gradient.addColorStop(0, "rgba(255, 255, 255, 0.02)");
+      gradient.addColorStop(0.5, "rgba(255, 255, 255, 0.08)");
+      gradient.addColorStop(1, "rgba(0, 0, 0, 0.12)");
+      context.fillStyle = gradient;
+      context.fillRect(0, 0, size, size);
+
+      const offset = frameIndex * 14;
+      for (let y = -80; y < size + 120; y += 64) {
+        this.strokeWaterWave(context, y + offset, size, water.highlightColor, 9, 0.18);
+        this.strokeWaterWave(context, y + offset + 28, size, "#021f38", 13, 0.2);
+      }
+
+      return Texture.from(canvas);
+    });
+  }
+
+  private strokeWaterWave(
+    context: CanvasRenderingContext2D,
+    y: number,
+    size: number,
+    color: string,
+    width: number,
+    alpha: number
+  ): void {
+    context.save();
+    context.globalAlpha = alpha;
+    context.strokeStyle = color;
+    context.lineWidth = width;
+    context.lineCap = "round";
+    context.beginPath();
+    context.moveTo(-48, y);
+    context.bezierCurveTo(size * 0.28, y + 26, size * 0.66, y - 24, size + 48, y + 12);
+    context.stroke();
+    context.restore();
   }
 
   private createCloudCanvas(image: HTMLImageElement): HTMLCanvasElement {
@@ -428,10 +563,13 @@ export class Game {
     this.doorStates.clear();
     this.vehicleBoardAttempts.clear();
     this.enemyEscortAttempts.clear();
+    this.photoDocumentAttempts.clear();
     this.escortedEnemies.clear();
     this.enemyEscorts.clear();
     this.characterVehicles.clear();
     this.vehicleOccupants.clear();
+    this.photographedDocuments.clear();
+    this.photoDocumentCapture = null;
 
     for (const [path, image] of Object.entries(objectImages)) {
       this.objectTextures.set(path, Texture.from(image));
@@ -492,6 +630,7 @@ export class Game {
     this.syncEnemyEscortAttemptTargets();
     this.syncDoorOpenAttemptTargets();
     this.syncVehicleBoardAttemptTargets();
+    this.syncPhotoDocumentAttemptTargets();
 
     for (const character of this.characters.values()) {
       if (character.hasActiveWork()) {
@@ -513,6 +652,8 @@ export class Game {
     this.updateTieAttempts();
     this.updateDoorOpenAttempts();
     this.updateVehicleBoardAttempts();
+    this.updatePhotoDocumentAttempts();
+    this.updatePhotoDocumentCapture();
     this.updateDoorAnimations(deltaTime);
     this.updateMissionObjective();
     if (this.levelCompleted || this.isEscapeSequenceActive()) {
@@ -675,6 +816,7 @@ export class Game {
     this.drawEnemyEscortPrompts();
     this.drawDoorOpenPrompts();
     this.drawVehiclePrompts();
+    this.drawPhotoDocumentPrompts();
     this.drawCloudZones();
 
     if (this.debugEnabled) {
@@ -712,6 +854,7 @@ export class Game {
         this.doorOpenAttempts.delete(clickedCharacter.id);
         this.vehicleBoardAttempts.delete(clickedCharacter.id);
         this.enemyEscortAttempts.delete(clickedCharacter.id);
+        this.photoDocumentAttempts.delete(clickedCharacter.id);
       }
       return;
     }
@@ -728,6 +871,7 @@ export class Game {
       this.doorOpenAttempts.delete(selectedCharacter.id);
       this.vehicleBoardAttempts.delete(selectedCharacter.id);
       this.enemyEscortAttempts.delete(selectedCharacter.id);
+      this.photoDocumentAttempts.delete(selectedCharacter.id);
       this.aimTargets.delete(selectedCharacter.id);
 
       if (!this.handleVehicleCommand(selectedCharacter, clickedVehicleObject)) {
@@ -736,6 +880,28 @@ export class Game {
       }
 
       this.addMarker(this.getVehicleMarkerPoint(clickedVehicleObject), "target");
+      return;
+    }
+
+    const clickedPhotoDocumentObject = this.findInteractiveLevelObjectAt(command.worldPosition, "photo-document");
+    if (clickedPhotoDocumentObject) {
+      this.cameraMode = "follow-selected";
+      this.tieAttempts.delete(selectedCharacter.id);
+      this.doorOpenAttempts.delete(selectedCharacter.id);
+      this.vehicleBoardAttempts.delete(selectedCharacter.id);
+      this.enemyEscortAttempts.delete(selectedCharacter.id);
+      this.photoDocumentAttempts.delete(selectedCharacter.id);
+      this.aimTargets.delete(selectedCharacter.id);
+
+      if (
+        !this.isPhotoDocumentInteractionDiscoverable(selectedCharacter, clickedPhotoDocumentObject) ||
+        !this.startPhotoDocumentAttempt(selectedCharacter, clickedPhotoDocumentObject)
+      ) {
+        this.addMarker(this.getPhotoDocumentInteractionPoint(clickedPhotoDocumentObject), "invalid");
+        return;
+      }
+
+      this.addMarker(this.getPhotoDocumentInteractionPoint(clickedPhotoDocumentObject), "target");
       return;
     }
 
@@ -754,6 +920,7 @@ export class Game {
         this.doorOpenAttempts.delete(selectedCharacter.id);
         this.vehicleBoardAttempts.delete(selectedCharacter.id);
         this.enemyEscortAttempts.delete(selectedCharacter.id);
+        this.photoDocumentAttempts.delete(selectedCharacter.id);
         this.aimTargets.delete(selectedCharacter.id);
 
         if (!this.handleEnemyEscortCommand(selectedCharacter, clickedEnemy, escortMode)) {
@@ -774,6 +941,7 @@ export class Game {
       this.doorOpenAttempts.delete(selectedCharacter.id);
       this.vehicleBoardAttempts.delete(selectedCharacter.id);
       this.enemyEscortAttempts.delete(selectedCharacter.id);
+      this.photoDocumentAttempts.delete(selectedCharacter.id);
       this.aimTargets.set(selectedCharacter.id, clickedEnemy.id);
 
       if (!this.startTieAttempt(selectedCharacter, clickedEnemy)) {
@@ -791,6 +959,7 @@ export class Game {
       this.tieAttempts.delete(selectedCharacter.id);
       this.vehicleBoardAttempts.delete(selectedCharacter.id);
       this.enemyEscortAttempts.delete(selectedCharacter.id);
+      this.photoDocumentAttempts.delete(selectedCharacter.id);
       this.aimTargets.delete(selectedCharacter.id);
 
       if (!this.startDoorOpenAttempt(selectedCharacter, clickedDoorObject)) {
@@ -819,6 +988,7 @@ export class Game {
     this.doorOpenAttempts.delete(selectedCharacter.id);
     this.vehicleBoardAttempts.delete(selectedCharacter.id);
     this.enemyEscortAttempts.delete(selectedCharacter.id);
+    this.photoDocumentAttempts.delete(selectedCharacter.id);
     this.aimTargets.delete(selectedCharacter.id);
     this.cameraMode = "follow-selected";
     this.addMarker(command.worldPosition, "target");
@@ -850,6 +1020,7 @@ export class Game {
     this.doorOpenAttempts.delete(character.id);
     this.vehicleBoardAttempts.delete(character.id);
     this.enemyEscortAttempts.delete(character.id);
+    this.photoDocumentAttempts.delete(character.id);
 
     if (character.id === "alek") {
       this.toggleDrone(character);
@@ -1052,6 +1223,7 @@ export class Game {
       this.doorOpenAttempts.delete(character.id);
       this.vehicleBoardAttempts.delete(character.id);
       this.enemyEscortAttempts.delete(character.id);
+      this.photoDocumentAttempts.delete(character.id);
       this.aimTargets.delete(character.id);
       this.droneInput.clear();
       this.cameraInput.clear();
@@ -1093,6 +1265,15 @@ export class Game {
   }
 
   private selectInitialCharacter(): void {
+    const preferredCharacter = this.level.initialSelectedCharacterId
+      ? this.characters.get(this.level.initialSelectedCharacterId)
+      : null;
+
+    if (preferredCharacter && !preferredCharacter.isDead() && !preferredCharacter.isBound()) {
+      this.selectCharacter(preferredCharacter.id);
+      return;
+    }
+
     const preferredOrder: CharacterId[] = ["alyosha", "alek", "maya"];
 
     for (const id of preferredOrder) {
@@ -1224,7 +1405,11 @@ export class Game {
     }
 
     const interactionPoint =
-      interaction.type === "enter-vehicle" ? this.getVehicleInteractionPoint(object) : object.position;
+      interaction.type === "enter-vehicle"
+        ? this.getVehicleInteractionPoint(object)
+        : interaction.type === "photo-document"
+          ? this.getPhotoDocumentInteractionPoint(object)
+          : object.position;
     const radius = Math.min(interaction.range, 86);
 
     return distanceSquared(point, interactionPoint) <= radius * radius;
@@ -1364,12 +1549,24 @@ export class Game {
       : null;
   }
 
+  private getHoveredPhotoDocumentObject(): PlacedLevelObject | null {
+    if (!this.cursorWorld || this.findCharacterAt(this.cursorWorld)) {
+      return null;
+    }
+
+    const object = this.findInteractiveLevelObjectAt(this.cursorWorld, "photo-document");
+    return object && this.isPhotoDocumentInteractionDiscoverable(this.getSelectedCharacter(), object)
+      ? object
+      : null;
+  }
+
   private updateCanvasCursor(): void {
     this.canvas.style.cursor =
       this.getHoveredTieEnemy() ||
       this.getHoveredEnemyEscortPrompt() ||
       this.getHoveredDoorObject() ||
-      this.getHoveredVehiclePrompt()
+      this.getHoveredVehiclePrompt() ||
+      this.getHoveredPhotoDocumentObject()
         ? "pointer"
         : "crosshair";
   }
@@ -1676,6 +1873,7 @@ export class Game {
     this.doorOpenAttempts.delete(character.id);
     this.vehicleBoardAttempts.delete(character.id);
     this.enemyEscortAttempts.delete(character.id);
+    this.photoDocumentAttempts.delete(character.id);
 
     character.setTarget(enemy.position, "walk", GAME_CONFIG.tie.walkSpeed);
     return true;
@@ -1762,6 +1960,7 @@ export class Game {
     this.doorOpenAttempts.delete(character.id);
     this.vehicleBoardAttempts.delete(character.id);
     this.enemyEscortAttempts.delete(character.id);
+    this.photoDocumentAttempts.delete(character.id);
     this.aimTargets.delete(character.id);
 
     if (this.tryCompleteEnemyEscortAttempt(character, enemy)) {
@@ -1868,6 +2067,7 @@ export class Game {
     this.tieAttempts.delete(character.id);
     this.doorOpenAttempts.delete(character.id);
     this.vehicleBoardAttempts.delete(character.id);
+    this.photoDocumentAttempts.delete(character.id);
     this.aimTargets.delete(character.id);
     enemy.updateEscortedPosition(this.getEnemyEscortFollowPoint(character), character.state.position, 0);
   }
@@ -2018,6 +2218,7 @@ export class Game {
     this.tieAttempts.delete(character.id);
     this.vehicleBoardAttempts.delete(character.id);
     this.enemyEscortAttempts.delete(character.id);
+    this.photoDocumentAttempts.delete(character.id);
     this.aimTargets.delete(character.id);
 
     if (this.tryCompleteDoorOpen(character, object)) {
@@ -2108,6 +2309,7 @@ export class Game {
     this.doorOpenAttempts.delete(character.id);
     this.vehicleBoardAttempts.delete(character.id);
     this.enemyEscortAttempts.delete(character.id);
+    this.photoDocumentAttempts.delete(character.id);
     this.aimTargets.delete(character.id);
 
     if (this.tryCompleteVehicleBoard(character, object)) {
@@ -2180,6 +2382,177 @@ export class Game {
     }
   }
 
+  private startPhotoDocumentAttempt(character: Character, object: PlacedLevelObject): boolean {
+    if (!this.canUsePhotoDocumentInteraction(character, object)) {
+      return false;
+    }
+
+    this.tieAttempts.delete(character.id);
+    this.doorOpenAttempts.delete(character.id);
+    this.vehicleBoardAttempts.delete(character.id);
+    this.enemyEscortAttempts.delete(character.id);
+    this.photoDocumentAttempts.delete(character.id);
+    this.aimTargets.delete(character.id);
+
+    if (this.tryCompletePhotoDocument(character, object)) {
+      return true;
+    }
+
+    if (
+      !this.moveCharacterTo(
+        character,
+        this.getPhotoDocumentInteractionPoint(object),
+        "walk",
+        GAME_CONFIG.tie.walkSpeed
+      )
+    ) {
+      return false;
+    }
+
+    this.photoDocumentAttempts.set(character.id, {
+      objectId: object.id
+    });
+    return true;
+  }
+
+  private syncPhotoDocumentAttemptTargets(): void {
+    for (const [characterId, attempt] of this.photoDocumentAttempts) {
+      const character = this.characters.get(characterId);
+      const object = this.getLevelObject(attempt.objectId);
+
+      if (!character || !object) {
+        this.photoDocumentAttempts.delete(characterId);
+        continue;
+      }
+
+      if (
+        character.state.action ||
+        character.state.stance !== "upright" ||
+        !character.state.targetPosition ||
+        !this.canUsePhotoDocumentInteraction(character, object)
+      ) {
+        character.stop();
+        this.photoDocumentAttempts.delete(characterId);
+        continue;
+      }
+    }
+  }
+
+  private updatePhotoDocumentAttempts(): void {
+    for (const [characterId, attempt] of this.photoDocumentAttempts) {
+      const character = this.characters.get(characterId);
+      const object = this.getLevelObject(attempt.objectId);
+
+      if (!character || !object) {
+        this.photoDocumentAttempts.delete(characterId);
+        continue;
+      }
+
+      if (!this.canUsePhotoDocumentInteraction(character, object)) {
+        character.stop();
+        this.photoDocumentAttempts.delete(characterId);
+        continue;
+      }
+
+      if (this.tryCompletePhotoDocument(character, object)) {
+        this.photoDocumentAttempts.delete(characterId);
+        continue;
+      }
+
+      if (!character.state.targetPosition) {
+        this.photoDocumentAttempts.delete(characterId);
+      }
+    }
+  }
+
+  private tryCompletePhotoDocument(character: Character, object: PlacedLevelObject): boolean {
+    if (!this.canUsePhotoDocumentInteraction(character, object)) {
+      return false;
+    }
+
+    const interactionPoint = this.getPhotoDocumentInteractionPoint(object);
+    const range = this.getPhotoDocumentInteractionRange(object);
+
+    if (distanceSquared(character.state.position, interactionPoint) > range * range) {
+      return false;
+    }
+
+    if (!character.takePhoto(interactionPoint)) {
+      return false;
+    }
+
+    this.photoDocumentCapture = {
+      objectId: object.id,
+      characterId: character.id,
+      startedAt: this.elapsedTime
+    };
+    this.addMarker(interactionPoint, "target");
+    this.logCombat("document photo started", {
+      character: character.id,
+      object: object.id
+    });
+    return true;
+  }
+
+  private updatePhotoDocumentCapture(): void {
+    if (!this.photoDocumentCapture) {
+      return;
+    }
+
+    const character = this.characters.get(this.photoDocumentCapture.characterId);
+    const object = this.getLevelObject(this.photoDocumentCapture.objectId);
+    const elapsed = this.elapsedTime - this.photoDocumentCapture.startedAt;
+
+    if (!character || !object) {
+      this.photoDocumentCapture = null;
+      return;
+    }
+
+    if (elapsed < GAME_CONFIG.specialActions.photo.duration) {
+      if (character.state.action !== "photo") {
+        this.photoDocumentCapture = null;
+      }
+      return;
+    }
+
+    this.photographedDocuments.add(object.id);
+    this.photoDocumentCapture = null;
+    this.addMarker(this.getPhotoDocumentInteractionPoint(object), "target");
+    this.logCombat("document photographed", {
+      character: character.id,
+      object: object.id
+    });
+    this.completeLevel();
+  }
+
+  private canUsePhotoDocumentInteraction(character: Character, object: PlacedLevelObject): boolean {
+    const interaction = object.interaction;
+
+    return Boolean(
+      this.level.objective === "photo-document" &&
+        interaction &&
+        interaction.type === "photo-document" &&
+        object.kind === "building" &&
+        !this.photographedDocuments.has(object.id) &&
+        (!interaction.photographerIds?.length || interaction.photographerIds.includes(character.id)) &&
+        !character.isDead() &&
+        !character.isBound() &&
+        !this.isCharacterInVehicle(character) &&
+        !this.isCharacterEscortingEnemy(character) &&
+        character.state.stance === "upright" &&
+        !character.state.action
+    );
+  }
+
+  private isPhotoDocumentInteractionDiscoverable(character: Character, object: PlacedLevelObject): boolean {
+    if (!this.canUsePhotoDocumentInteraction(character, object)) {
+      return false;
+    }
+
+    const range = this.getPhotoDocumentInteractionRange(object);
+    return distanceSquared(character.state.position, this.getPhotoDocumentInteractionPoint(object)) <= range * range;
+  }
+
   private canStartVehicleBoardAttempt(character: Character, object: PlacedLevelObject): boolean {
     const interaction = object.interaction;
 
@@ -2223,6 +2596,7 @@ export class Game {
     this.tieAttempts.delete(character.id);
     this.doorOpenAttempts.delete(character.id);
     this.enemyEscortAttempts.delete(character.id);
+    this.photoDocumentAttempts.delete(character.id);
     this.aimTargets.delete(character.id);
     if (character.state.selected) {
       this.droneInput.clear();
@@ -2305,6 +2679,32 @@ export class Game {
 
   private getVehicleMarkerPoint(object: PlacedLevelObject): WorldPoint {
     return this.getVehiclePromptPoint(object);
+  }
+
+  private getPhotoDocumentInteractionPoint(object: PlacedLevelObject): WorldPoint {
+    const interaction = object.interaction;
+    return interaction?.type === "photo-document"
+      ? this.localObjectPointToWorld(object, interaction.point)
+      : object.position;
+  }
+
+  private getPhotoDocumentInteractionRange(object: PlacedLevelObject): number {
+    const interaction = object.interaction;
+    return interaction?.type === "photo-document"
+      ? interaction.range
+      : GAME_CONFIG.specialActions.photo.range;
+  }
+
+  private getPhotoDocumentPromptPoint(object: PlacedLevelObject): WorldPoint {
+    const interaction = object.interaction;
+    if (!interaction || interaction.type !== "photo-document") {
+      return object.position;
+    }
+
+    return this.localObjectPointToWorld(object, {
+      x: interaction.point.x + interaction.promptOffset.x,
+      y: interaction.point.y + interaction.promptOffset.y
+    });
   }
 
   private getVehicleExitPoint(object: PlacedLevelObject): WorldPoint {
@@ -2449,6 +2849,10 @@ export class Game {
   }
 
   private updateMissionObjective(): void {
+    if (this.level.objective !== "tractor-escape") {
+      return;
+    }
+
     if (this.levelCompleted || this.missionPhase === "escaping") {
       return;
     }
@@ -2502,11 +2906,13 @@ export class Game {
     this.doorOpenAttempts.clear();
     this.vehicleBoardAttempts.clear();
     this.enemyEscortAttempts.clear();
+    this.photoDocumentAttempts.clear();
     this.escortedEnemies.clear();
     this.enemyEscorts.clear();
     this.aimTargets.clear();
     this.enemyShotStates.clear();
     this.pendingDroneShot = null;
+    this.photoDocumentCapture = null;
     this.alarmActive = false;
     this.alarmFlash = null;
     this.cameraMode = "free";
@@ -2624,11 +3030,22 @@ export class Game {
     this.doorOpenAttempts.clear();
     this.vehicleBoardAttempts.clear();
     this.enemyEscortAttempts.clear();
+    this.photoDocumentAttempts.clear();
     this.escortedEnemies.clear();
     this.enemyEscorts.clear();
+    this.photoDocumentCapture = null;
     this.pendingDroneShot = null;
+    this.notifyLevelComplete();
     this.loop.stop();
     window.setTimeout(() => this.showLevelCompletePrompt(), 0);
+  }
+
+  private notifyLevelComplete(): void {
+    try {
+      this.options.onLevelComplete?.(this.level.id);
+    } catch (error) {
+      console.error("Failed to persist level completion.", error);
+    }
   }
 
   private showLevelCompletePrompt(): void {
@@ -3228,6 +3645,7 @@ export class Game {
       this.doorOpenAttempts.delete(character.id);
       this.vehicleBoardAttempts.delete(character.id);
       this.enemyEscortAttempts.delete(character.id);
+      this.photoDocumentAttempts.delete(character.id);
       this.stopEnemyEscort(character);
       this.aimTargets.delete(character.id);
       this.endGame(character, source);
@@ -3254,6 +3672,9 @@ export class Game {
     this.enemyShotStates.clear();
     this.doorOpenAttempts.clear();
     this.vehicleBoardAttempts.clear();
+    this.enemyEscortAttempts.clear();
+    this.photoDocumentAttempts.clear();
+    this.photoDocumentCapture = null;
     this.pendingDroneShot = null;
     this.logCombat("game over", {
       killedCharacter: killedCharacter.id,
@@ -3578,6 +3999,10 @@ export class Game {
     const { width, height } = this.level.worldSize;
 
     if (this.mapTexture) {
+      if (this.level.animatedWater) {
+        this.drawAnimatedWaterLayer(width, height);
+      }
+
       const mapSprite = new Sprite(this.mapTexture);
       mapSprite.position.set(0, 0);
       mapSprite.width = width;
@@ -3642,6 +4067,20 @@ export class Game {
     graphics.rect(0, 0, width, height).stroke({ color: "#10140d", width: 6 });
     graphics.rect(0, height - 18, width, 18).fill({ color: "#0f120c", alpha: 0.42 });
     graphics.rect(width - 18, 0, 18, height).fill({ color: "#0f120c", alpha: 0.42 });
+  }
+
+  private drawAnimatedWaterLayer(width: number, height: number): void {
+    const water = this.level.animatedWater;
+    if (!water || this.waterTextures.length === 0) {
+      return;
+    }
+
+    const frameIndex = Math.floor(this.elapsedTime * 3) % this.waterTextures.length;
+    const sprite = new Sprite(this.waterTextures[frameIndex]);
+    sprite.position.set(0, 0);
+    sprite.width = width;
+    sprite.height = height;
+    this.renderer.layers.background.addChild(sprite);
   }
 
   private drawSortedRenderables(): void {
@@ -3969,6 +4408,72 @@ export class Game {
     for (const prompt of prompts.values()) {
       this.drawVehiclePrompt(prompt.object, prompt.mode, prompt.hovered);
     }
+  }
+
+  private drawPhotoDocumentPrompts(): void {
+    const prompts = new Map<string, { object: PlacedLevelObject; hovered: boolean }>();
+    const hoveredObject = this.getHoveredPhotoDocumentObject();
+
+    if (hoveredObject) {
+      prompts.set(hoveredObject.id, { object: hoveredObject, hovered: true });
+    }
+
+    for (const [characterId, attempt] of this.photoDocumentAttempts) {
+      const character = this.characters.get(characterId);
+      const object = this.getLevelObject(attempt.objectId);
+      if (object && character && this.canUsePhotoDocumentInteraction(character, object)) {
+        prompts.set(object.id, {
+          object,
+          hovered: prompts.get(object.id)?.hovered ?? false
+        });
+      }
+    }
+
+    for (const prompt of prompts.values()) {
+      this.drawPhotoDocumentPrompt(prompt.object, prompt.hovered);
+    }
+  }
+
+  private drawPhotoDocumentPrompt(object: PlacedLevelObject, hovered: boolean): void {
+    const promptPoint = this.getPhotoDocumentPromptPoint(object);
+    const blink = 0.5 + Math.sin(this.elapsedTime * Math.PI * 4.8) * 0.5;
+    const bob = Math.sin(this.elapsedTime * Math.PI * 2.08) * 2.4;
+    const alpha = hovered ? 0.42 + blink * 0.58 : 0.52 + blink * 0.2;
+    const graphics = new Graphics();
+
+    graphics.position.set(promptPoint.x, promptPoint.y + bob);
+    graphics.alpha = alpha;
+    this.strokePhotoDocumentIcon(graphics, "#080a07", 6, 0.86);
+    this.strokePhotoDocumentIcon(graphics, "#f3e5a8", 2.7);
+    graphics
+      .circle(0, -3, 5)
+      .stroke({ color: "#f3e5a8", width: 2 })
+      .circle(0, -3, 2)
+      .fill("#bfe7ff");
+    this.renderer.layers.prompts.addChild(graphics);
+  }
+
+  private strokePhotoDocumentIcon(
+    graphics: Graphics,
+    color: string,
+    width: number,
+    alpha = 1
+  ): void {
+    graphics
+      .rect(-18, -12, 36, 24)
+      .rect(-11, -18, 15, 6)
+      .moveTo(15, -23)
+      .lineTo(26, -23)
+      .lineTo(26, 13)
+      .lineTo(8, 13)
+      .moveTo(16, -23)
+      .lineTo(16, -14)
+      .lineTo(26, -14)
+      .moveTo(13, 22)
+      .lineTo(25, 22)
+      .moveTo(13, 29)
+      .lineTo(22, 29)
+      .stroke({ color, alpha, width, cap: "round", join: "round" });
   }
 
   private drawVehiclePrompt(

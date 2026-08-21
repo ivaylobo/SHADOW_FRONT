@@ -7,7 +7,25 @@
     <title>Shadow Front Prototype</title>
   </head>
   <body>
-    <div id="app">
+    <section id="mission-map-screen" aria-label="Campaign map">
+      <main class="mission-map__stage" aria-label="Ukraine and Russia mission map">
+        <img
+          class="campaign-map"
+          src="/assets/Maps/campaign-ukraine-russia.svg"
+          aria-label="Map of Ukraine and Russia"
+        />
+        <div id="mission-marker-layer" class="mission-marker-layer"></div>
+      </main>
+
+      <aside class="mission-map__briefing" aria-label="Mission briefing">
+        <p class="label">Campaign</p>
+        <h1>Shadow Front</h1>
+        <p id="mission-progress" class="mission-progress"></p>
+        <ul id="mission-list" class="mission-list"></ul>
+      </aside>
+    </section>
+
+    <div id="app" hidden>
       <main id="game-shell" aria-label="Game area">
         <canvas id="game-canvas"></canvas>
       </main>

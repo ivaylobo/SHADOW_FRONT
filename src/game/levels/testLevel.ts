@@ -3,6 +3,7 @@ import type { LevelDefinition } from "./LevelDefinition";
 export const testLevel: LevelDefinition = {
   id: "level-one",
   name: "Level One",
+  objective: "tractor-escape",
   description: {
     title: "Free Maya",
     paragraphs: [
@@ -393,54 +394,54 @@ export const testLevel: LevelDefinition = {
       id: "enemy-3",
       name: "Prison Road Patrol",
       route: [
-        { x: 1980, y: 905 },
-        { x: 2265, y: 895 },
-        { x: 2410, y: 1085 },
-        { x: 2145, y: 1210 },
-        { x: 1865, y: 1035 }
+        { x: 1640, y: 880 },
+        { x: 2060, y: 875 },
+        { x: 2290, y: 1075 },
+        { x: 2075, y: 1280 },
+        { x: 1620, y: 1120 }
       ],
       alarmRoute: [
-        { x: 1840, y: 810 },
-        { x: 2240, y: 800 },
-        { x: 2440, y: 1045 },
-        { x: 2140, y: 1260 },
-        { x: 1765, y: 1040 }
+        { x: 1510, y: 790 },
+        { x: 2115, y: 775 },
+        { x: 2385, y: 1065 },
+        { x: 2050, y: 1360 },
+        { x: 1485, y: 1125 }
       ]
     },
     {
       id: "enemy-5",
       name: "South East Patrol",
       route: [
-        { x: 1660, y: 1660 },
-        { x: 2050, y: 1595 },
-        { x: 2260, y: 1900 },
+        { x: 1620, y: 1505 },
+        { x: 2020, y: 1485 },
+        { x: 2260, y: 1845 },
         { x: 1940, y: 2200 },
-        { x: 1560, y: 2030 }
+        { x: 1540, y: 2020 }
       ],
       alarmRoute: [
-        { x: 1500, y: 1535 },
-        { x: 2180, y: 1480 },
-        { x: 2390, y: 1970 },
-        { x: 1840, y: 2360 },
-        { x: 1395, y: 1970 }
+        { x: 1450, y: 1455 },
+        { x: 2170, y: 1405 },
+        { x: 2390, y: 1935 },
+        { x: 1845, y: 2350 },
+        { x: 1365, y: 1980 }
       ]
     },
     {
       id: "enemy-6",
       name: "West Road Patrol",
       route: [
-        { x: 520, y: 1220 },
-        { x: 780, y: 1010 },
-        { x: 1030, y: 1225 },
-        { x: 830, y: 1540 },
-        { x: 500, y: 1480 }
+        { x: 335, y: 1305 },
+        { x: 515, y: 1130 },
+        { x: 705, y: 1325 },
+        { x: 585, y: 1580 },
+        { x: 335, y: 1490 }
       ],
       alarmRoute: [
-        { x: 425, y: 1030 },
-        { x: 830, y: 885 },
-        { x: 1160, y: 1260 },
-        { x: 760, y: 1690 },
-        { x: 360, y: 1450 }
+        { x: 285, y: 1110 },
+        { x: 580, y: 980 },
+        { x: 875, y: 1330 },
+        { x: 550, y: 1710 },
+        { x: 250, y: 1490 }
       ]
     }
   ]

@@ -123,7 +123,7 @@ export const GAME_CONFIG = {
     revealSampleSpacing: 120
   },
   tie: {
-    walkSpeed: 86,
+    walkSpeed: 104,
     catchRange: 30
   },
   markerDuration: 0.75,
@@ -196,6 +196,10 @@ export const CONTROL_HELP: ControlHelpItem[] = [
   {
     command: "Hover + click arrested enemy",
     description: "Lead them with the selected hero, or leave them in place"
+  },
+  {
+    command: "Maya: hover + click photo prompt",
+    description: "Photograph the discovered mission document"
   },
   {
     command: "Left-click hero",

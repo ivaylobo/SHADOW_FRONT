@@ -63,7 +63,18 @@ export interface LevelObjectVehicleInteraction {
   hiddenFromEnemies?: boolean;
 }
 
-export type LevelObjectInteraction = LevelObjectDoorInteraction | LevelObjectVehicleInteraction;
+export interface LevelObjectPhotoDocumentInteraction {
+  type: "photo-document";
+  point: WorldPoint;
+  range: number;
+  promptOffset: WorldPoint;
+  photographerIds?: CharacterId[];
+}
+
+export type LevelObjectInteraction =
+  | LevelObjectDoorInteraction
+  | LevelObjectVehicleInteraction
+  | LevelObjectPhotoDocumentInteraction;
 
 export interface LevelObjectDefinition {
   id: string;
@@ -94,15 +105,23 @@ export interface LevelDescription {
   completion: string;
 }
 
+export interface AnimatedWaterLayer {
+  baseColor: string;
+  highlightColor: string;
+}
+
 export interface LevelDefinition {
   id: string;
   name: string;
+  objective: "tractor-escape" | "photo-document";
   description: LevelDescription;
   worldSize: {
     width: number;
     height: number;
   };
   mapImagePath?: string;
+  animatedWater?: AnimatedWaterLayer;
+  initialSelectedCharacterId?: CharacterId;
   initialPositions: Record<CharacterId, WorldPoint>;
   collisionPolygons: CollisionPolygon[];
   decorativeObjects: ObliquePrism[];

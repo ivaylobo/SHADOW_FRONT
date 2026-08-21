@@ -12,6 +12,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html,
 body,
 #app {
@@ -23,6 +27,214 @@ body,
 
 body {
   background: #151710;
+}
+
+#mission-map-screen {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 308px;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(194, 178, 96, 0.12), transparent 32%),
+    linear-gradient(135deg, #10160f 0%, #182015 44%, #0d1210 100%);
+}
+
+.mission-map__stage {
+  position: relative;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.campaign-map {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: fill;
+  pointer-events: none;
+  user-select: none;
+}
+
+.mission-marker-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+
+.mission-flag {
+  position: absolute;
+  left: var(--mission-x);
+  top: var(--mission-y);
+  width: 138px;
+  height: 86px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #f1ecdc;
+  text-align: left;
+  transform: translate(-22px, -68px);
+}
+
+.mission-flag:not(:disabled) {
+  cursor: pointer;
+}
+
+.mission-flag:disabled {
+  cursor: default;
+}
+
+.mission-flag__pole {
+  position: absolute;
+  left: 20px;
+  top: 17px;
+  width: 4px;
+  height: 61px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #e3dcc5, #8a836b);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+}
+
+.mission-flag__cloth {
+  position: absolute;
+  left: 22px;
+  top: 12px;
+  width: 46px;
+  height: 27px;
+  clip-path: polygon(0 0, 100% 9%, 80% 50%, 100% 91%, 0 100%);
+  transform-origin: left center;
+  background: #6f756c;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 6px 13px rgba(0, 0, 0, 0.36);
+}
+
+.mission-flag__pin {
+  position: absolute;
+  left: 13px;
+  top: 72px;
+  width: 18px;
+  height: 9px;
+  border-radius: 50%;
+  background: rgba(10, 13, 9, 0.72);
+  box-shadow: 0 0 0 2px rgba(232, 223, 190, 0.18);
+}
+
+.mission-flag__label {
+  position: absolute;
+  left: 0;
+  top: 44px;
+  width: min-content;
+  min-width: 96px;
+  max-width: 132px;
+  padding: 5px 7px;
+  border: 1px solid rgba(227, 219, 190, 0.26);
+  border-radius: 4px;
+  background: rgba(14, 19, 13, 0.84);
+  color: #d9d3c0;
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.15;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+}
+
+.mission-flag.is-active .mission-flag__cloth {
+  background: linear-gradient(180deg, #2f79be 0 50%, #e3c84a 50% 100%);
+  animation: flag-wave 1.05s ease-in-out infinite;
+}
+
+.mission-flag.is-completed .mission-flag__cloth {
+  background: linear-gradient(180deg, #2f79be 0 50%, #64b86f 50% 100%);
+}
+
+.mission-flag.is-active .mission-flag__label {
+  color: #fff4ca;
+  border-color: rgba(228, 207, 86, 0.56);
+}
+
+.mission-flag.is-playable:focus-visible .mission-flag__cloth,
+.mission-flag.is-playable:hover .mission-flag__cloth {
+  filter: brightness(1.15);
+}
+
+.mission-flag.is-playable:focus-visible .mission-flag__label,
+.mission-flag.is-playable:hover .mission-flag__label {
+  border-color: rgba(250, 232, 127, 0.78);
+  color: #fff8d8;
+}
+
+.mission-flag.is-locked .mission-flag__label {
+  color: #aeb4a7;
+}
+
+@keyframes flag-wave {
+  0%,
+  100% {
+    transform: perspective(80px) rotateY(-10deg) skewY(-2deg);
+  }
+
+  50% {
+    transform: perspective(80px) rotateY(15deg) skewY(3deg) translateX(2px);
+  }
+}
+
+.mission-map__briefing {
+  height: 100%;
+  overflow-y: auto;
+  border-left: 1px solid #303529;
+  background: rgba(26, 31, 23, 0.96);
+  padding: 22px 18px;
+}
+
+.mission-progress {
+  margin: -6px 0 20px;
+  color: #c9c1a3;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.mission-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid #32382c;
+}
+
+.mission-list__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #32382c;
+  color: #aeb7a6;
+  font-size: 13px;
+}
+
+.mission-list__item span {
+  min-width: 0;
+  color: inherit;
+  font-weight: 720;
+}
+
+.mission-list__item strong {
+  color: #9ea89b;
+  font-size: 11px;
+  font-weight: 780;
+  text-transform: uppercase;
+}
+
+.mission-list__item.is-active span {
+  color: #f0eee5;
+}
+
+.mission-list__item.is-active strong {
+  color: #e1cc58;
+}
+
+.mission-list__item.is-completed strong {
+  color: #76ca81;
 }
 
 #app {
@@ -176,6 +388,29 @@ summary {
 }
 
 @media (max-width: 860px) {
+  #mission-map-screen {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .mission-map__briefing {
+    height: auto;
+    max-height: 38vh;
+    border-left: 0;
+    border-top: 1px solid #303529;
+    padding: 14px;
+  }
+
+  .mission-flag {
+    width: 116px;
+  }
+
+  .mission-flag__label {
+    min-width: 84px;
+    max-width: 112px;
+    font-size: 10px;
+  }
+
   #app {
     min-width: 0;
   }
