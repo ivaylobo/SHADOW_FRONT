@@ -147,6 +147,21 @@ interface PlacedLevelObject extends LevelObjectDefinition {
 type LevelObjectInteractionType = NonNullable<LevelObjectDefinition["interaction"]>["type"];
 type VehiclePromptMode = "mount" | "dismount";
 type MissionPhase = "free-maya" | "return-to-tractor" | "escaping";
+type InteractivePromptHit =
+  | {
+      type: "enemy-escort";
+      enemy: Enemy;
+      mode: EnemyEscortPromptMode;
+    }
+  | {
+      type: "vehicle";
+      object: PlacedLevelObject;
+      mode: VehiclePromptMode;
+    }
+  | {
+      type: "photo-document";
+      object: PlacedLevelObject;
+    };
 
 interface EscapeSequence {
   elapsed: number;
@@ -157,12 +172,37 @@ interface GameOptions {
   onLevelComplete?: (levelId: string) => void;
 }
 
+interface PromptHitBounds {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
 const START_TRACTOR_ID = "tractor-start";
 const START_TOWED_VEHICLE_ID = "mt-lb-start";
 const ESCAPE_CHARACTER_IDS: CharacterId[] = ["maya", "alyosha", "alek"];
 const ESCAPE_DIRECTION: WorldPoint = { x: -0.86, y: 0.5 };
 const ESCAPE_SPEED = 175;
 const ESCAPE_ANIMATION_FPS = 10;
+const ENEMY_ESCORT_PROMPT_HIT_BOUNDS: PromptHitBounds = {
+  left: -28,
+  top: -23,
+  right: 28,
+  bottom: 32
+};
+const VEHICLE_PROMPT_HIT_BOUNDS: PromptHitBounds = {
+  left: -24,
+  top: -36,
+  right: 24,
+  bottom: 24
+};
+const PHOTO_DOCUMENT_PROMPT_HIT_BOUNDS: PromptHitBounds = {
+  left: -25,
+  top: -28,
+  right: 31,
+  bottom: 35
+};
 
 interface PathCell {
   x: number;
@@ -839,6 +879,13 @@ export class Game {
     this.updateAimTargetFromPoint(command.worldPosition);
 
     const selectedCharacter = this.getSelectedCharacter();
+    const clickedPrompt = this.findInteractivePromptAt(command.worldPosition, selectedCharacter);
+
+    if (clickedPrompt) {
+      this.handleInteractivePromptCommand(selectedCharacter, clickedPrompt);
+      return;
+    }
+
     const clickedCharacter = this.findCharacterAt(command.worldPosition);
 
     if (clickedCharacter) {
@@ -992,6 +1039,67 @@ export class Game {
     this.aimTargets.delete(selectedCharacter.id);
     this.cameraMode = "follow-selected";
     this.addMarker(command.worldPosition, "target");
+  }
+
+  private handleInteractivePromptCommand(
+    selectedCharacter: Character,
+    prompt: InteractivePromptHit
+  ): void {
+    switch (prompt.type) {
+      case "enemy-escort":
+        this.cameraMode = "follow-selected";
+        this.tieAttempts.delete(selectedCharacter.id);
+        this.doorOpenAttempts.delete(selectedCharacter.id);
+        this.vehicleBoardAttempts.delete(selectedCharacter.id);
+        this.enemyEscortAttempts.delete(selectedCharacter.id);
+        this.photoDocumentAttempts.delete(selectedCharacter.id);
+        this.aimTargets.delete(selectedCharacter.id);
+
+        if (!this.handleEnemyEscortCommand(selectedCharacter, prompt.enemy, prompt.mode)) {
+          this.addMarker(prompt.enemy.position, "invalid");
+          return;
+        }
+
+        this.addMarker(prompt.enemy.position, "target");
+        return;
+
+      case "vehicle":
+        this.cameraMode = "follow-selected";
+        this.tieAttempts.delete(selectedCharacter.id);
+        this.doorOpenAttempts.delete(selectedCharacter.id);
+        this.vehicleBoardAttempts.delete(selectedCharacter.id);
+        this.enemyEscortAttempts.delete(selectedCharacter.id);
+        this.photoDocumentAttempts.delete(selectedCharacter.id);
+        this.aimTargets.delete(selectedCharacter.id);
+
+        if (!this.handleVehicleCommand(selectedCharacter, prompt.object)) {
+          this.addMarker(this.getVehicleMarkerPoint(prompt.object), "invalid");
+          return;
+        }
+
+        this.addMarker(this.getVehicleMarkerPoint(prompt.object), "target");
+        return;
+
+      case "photo-document":
+        this.cameraMode = "follow-selected";
+        this.tieAttempts.delete(selectedCharacter.id);
+        this.doorOpenAttempts.delete(selectedCharacter.id);
+        this.vehicleBoardAttempts.delete(selectedCharacter.id);
+        this.enemyEscortAttempts.delete(selectedCharacter.id);
+        this.photoDocumentAttempts.delete(selectedCharacter.id);
+        this.aimTargets.delete(selectedCharacter.id);
+
+        if (
+          !this.isPhotoDocumentInteractionDiscoverable(selectedCharacter, prompt.object) ||
+          !this.startPhotoDocumentAttempt(selectedCharacter, prompt.object)
+        ) {
+          this.addMarker(this.getPhotoDocumentInteractionPoint(prompt.object), "invalid");
+          return;
+        }
+
+        this.addMarker(this.getPhotoDocumentInteractionPoint(prompt.object), "target");
+        return;
+    }
   }
 
   private triggerSelectedSpecialAction(): void {
@@ -1373,6 +1481,158 @@ export class Game {
     return topObject;
   }
 
+  private findInteractivePromptAt(
+    point: WorldPoint,
+    selectedCharacter: Character
+  ): InteractivePromptHit | null {
+    const photoDocumentPrompt = this.findPhotoDocumentPromptAt(point, selectedCharacter);
+    if (photoDocumentPrompt) {
+      return {
+        type: "photo-document",
+        object: photoDocumentPrompt
+      };
+    }
+
+    const vehiclePrompt = this.findVehiclePromptAt(point, selectedCharacter);
+    if (vehiclePrompt) {
+      return {
+        type: "vehicle",
+        object: vehiclePrompt.object,
+        mode: vehiclePrompt.mode
+      };
+    }
+
+    const enemyEscortPrompt = this.findEnemyEscortPromptAt(point, selectedCharacter);
+    if (enemyEscortPrompt) {
+      return {
+        type: "enemy-escort",
+        enemy: enemyEscortPrompt.enemy,
+        mode: enemyEscortPrompt.mode
+      };
+    }
+
+    return null;
+  }
+
+  private findEnemyEscortPromptAt(
+    point: WorldPoint,
+    selectedCharacter: Character
+  ): { enemy: Enemy; mode: EnemyEscortPromptMode } | null {
+    let topPrompt: { enemy: Enemy; mode: EnemyEscortPromptMode } | null = null;
+    let topY = -Infinity;
+
+    for (const enemy of this.enemies.values()) {
+      const mode = this.getEnemyEscortPromptMode(selectedCharacter, enemy);
+      if (
+        !mode ||
+        !this.containsInteractionPromptPoint(
+          point,
+          enemy.getOverheadPoint(),
+          ENEMY_ESCORT_PROMPT_HIT_BOUNDS
+        )
+      ) {
+        continue;
+      }
+
+      if (enemy.position.y <= topY) {
+        continue;
+      }
+
+      topPrompt = { enemy, mode };
+      topY = enemy.position.y;
+    }
+
+    return topPrompt;
+  }
+
+  private findVehiclePromptAt(
+    point: WorldPoint,
+    selectedCharacter: Character
+  ): { object: PlacedLevelObject; mode: VehiclePromptMode } | null {
+    let topPrompt: { object: PlacedLevelObject; mode: VehiclePromptMode } | null = null;
+    let topY = -Infinity;
+    const selectedVehicleId = this.characterVehicles.get(selectedCharacter.id);
+
+    for (const object of this.levelObjects) {
+      const interaction = object.interaction;
+      if (
+        !interaction ||
+        interaction.type !== "enter-vehicle" ||
+        object.kind !== "vehicle" ||
+        !this.containsInteractionPromptPoint(
+          point,
+          this.getVehiclePromptPoint(object),
+          VEHICLE_PROMPT_HIT_BOUNDS
+        )
+      ) {
+        continue;
+      }
+
+      const mode =
+        selectedVehicleId === object.id && this.canDismountVehicle(selectedCharacter, object)
+          ? "dismount"
+          : !selectedVehicleId && this.canStartVehicleBoardAttempt(selectedCharacter, object)
+            ? "mount"
+            : null;
+
+      if (!mode || object.position.y <= topY) {
+        continue;
+      }
+
+      topPrompt = { object, mode };
+      topY = object.position.y;
+    }
+
+    return topPrompt;
+  }
+
+  private findPhotoDocumentPromptAt(
+    point: WorldPoint,
+    selectedCharacter: Character
+  ): PlacedLevelObject | null {
+    let topObject: PlacedLevelObject | null = null;
+    let topY = -Infinity;
+
+    for (const object of this.levelObjects) {
+      const interaction = object.interaction;
+      if (
+        !interaction ||
+        interaction.type !== "photo-document" ||
+        object.kind !== "building" ||
+        !this.isPhotoDocumentInteractionDiscoverable(selectedCharacter, object) ||
+        !this.containsInteractionPromptPoint(
+          point,
+          this.getPhotoDocumentPromptPoint(object),
+          PHOTO_DOCUMENT_PROMPT_HIT_BOUNDS
+        )
+      ) {
+        continue;
+      }
+
+      if (object.position.y <= topY) {
+        continue;
+      }
+
+      topObject = object;
+      topY = object.position.y;
+    }
+
+    return topObject;
+  }
+
+  private containsInteractionPromptPoint(
+    point: WorldPoint,
+    promptPoint: WorldPoint,
+    bounds: PromptHitBounds
+  ): boolean {
+    return (
+      point.x >= promptPoint.x + bounds.left &&
+      point.x <= promptPoint.x + bounds.right &&
+      point.y >= promptPoint.y + bounds.top &&
+      point.y <= promptPoint.y + bounds.bottom
+    );
+  }
+
   private containsLevelObjectPoint(object: PlacedLevelObject, point: WorldPoint): boolean {
     const size = this.getLevelObjectRenderSize(object);
     const anchor = this.getLevelObjectAnchor(object);
@@ -1501,7 +1761,17 @@ export class Game {
   }
 
   private getHoveredEnemyEscortPrompt(): { enemy: Enemy; mode: EnemyEscortPromptMode } | null {
-    if (!this.cursorWorld || this.findCharacterAt(this.cursorWorld)) {
+    if (!this.cursorWorld) {
+      return null;
+    }
+
+    const selectedCharacter = this.getSelectedCharacter();
+    const prompt = this.findEnemyEscortPromptAt(this.cursorWorld, selectedCharacter);
+    if (prompt) {
+      return prompt;
+    }
+
+    if (this.findCharacterAt(this.cursorWorld)) {
       return null;
     }
 
@@ -1510,7 +1780,7 @@ export class Game {
       return null;
     }
 
-    const mode = this.getEnemyEscortPromptMode(this.getSelectedCharacter(), enemy);
+    const mode = this.getEnemyEscortPromptMode(selectedCharacter, enemy);
     return mode ? { enemy, mode } : null;
   }
 
@@ -1526,7 +1796,17 @@ export class Game {
   }
 
   private getHoveredVehiclePrompt(): { object: PlacedLevelObject; mode: VehiclePromptMode } | null {
-    if (!this.cursorWorld || this.findCharacterAt(this.cursorWorld)) {
+    if (!this.cursorWorld) {
+      return null;
+    }
+
+    const selectedCharacter = this.getSelectedCharacter();
+    const prompt = this.findVehiclePromptAt(this.cursorWorld, selectedCharacter);
+    if (prompt) {
+      return prompt;
+    }
+
+    if (this.findCharacterAt(this.cursorWorld)) {
       return null;
     }
 
@@ -1535,7 +1815,6 @@ export class Game {
       return null;
     }
 
-    const selectedCharacter = this.getSelectedCharacter();
     const selectedVehicleId = this.characterVehicles.get(selectedCharacter.id);
 
     if (selectedVehicleId) {
@@ -1550,12 +1829,22 @@ export class Game {
   }
 
   private getHoveredPhotoDocumentObject(): PlacedLevelObject | null {
-    if (!this.cursorWorld || this.findCharacterAt(this.cursorWorld)) {
+    if (!this.cursorWorld) {
+      return null;
+    }
+
+    const selectedCharacter = this.getSelectedCharacter();
+    const prompt = this.findPhotoDocumentPromptAt(this.cursorWorld, selectedCharacter);
+    if (prompt) {
+      return prompt;
+    }
+
+    if (this.findCharacterAt(this.cursorWorld)) {
       return null;
     }
 
     const object = this.findInteractiveLevelObjectAt(this.cursorWorld, "photo-document");
-    return object && this.isPhotoDocumentInteractionDiscoverable(this.getSelectedCharacter(), object)
+    return object && this.isPhotoDocumentInteractionDiscoverable(selectedCharacter, object)
       ? object
       : null;
   }
