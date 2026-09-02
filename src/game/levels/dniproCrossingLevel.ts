@@ -113,6 +113,38 @@ export const dniproCrossingLevel: LevelDefinition = {
       }
     },
     {
+      id: "bomb-house-west",
+      label: "Bomb House",
+      kind: "building",
+      imagePath: "/assets/objects/building-rural-house.png",
+      position: p(210, 180),
+      scale: s(0.23),
+      collisionShapes: [
+        {
+          id: "bomb-house-west-body",
+          points: [
+            p(-86, -88),
+            p(28, -116),
+            p(90, -66),
+            p(84, -13),
+            p(-70, -8),
+            p(-98, -46)
+          ]
+        }
+      ],
+      entryZones: [
+        {
+          id: "bomb-house-west-door",
+          points: [
+            p(-24, -26),
+            p(28, -29),
+            p(34, 8),
+            p(-27, 12)
+          ]
+        }
+      ]
+    },
+    {
       id: "decoy-farmhouse-north",
       label: "Rural House",
       kind: "building",
@@ -199,6 +231,96 @@ export const dniproCrossingLevel: LevelDefinition = {
     }
   ],
   captives: [],
-  enemySpawnPoints: [],
-  enemyPatrols: []
+  enemySpawnPoints: [
+    p(60, 105),
+    p(110, 190),
+    p(260, 525),
+    p(300, 825),
+    p(840, 205),
+    p(815, 545),
+    p(1210, 720),
+    p(1130, 980)
+  ],
+  enemyPatrols: [
+    {
+      id: "enemy-1",
+      name: "North West Patrol",
+      route: [
+        p(60, 105),
+        p(330, 100),
+        p(435, 220),
+        p(355, 350)
+      ]
+    },
+    {
+      id: "enemy-2",
+      name: "Bomb House Patrol",
+      route: [
+        p(110, 190),
+        p(305, 255),
+        p(420, 380),
+        p(265, 500)
+      ]
+    },
+    {
+      id: "enemy-3",
+      name: "West Center Patrol",
+      route: [
+        p(260, 525),
+        p(420, 585),
+        p(500, 715),
+        p(340, 800)
+      ]
+    },
+    {
+      id: "enemy-4",
+      name: "West Bridge Approach Patrol",
+      route: [
+        p(300, 825),
+        p(445, 900),
+        p(510, 990),
+        p(390, 930)
+      ]
+    },
+    {
+      id: "enemy-5",
+      name: "North East Patrol",
+      route: [
+        p(840, 205),
+        p(925, 280),
+        p(815, 390),
+        p(880, 515)
+      ]
+    },
+    {
+      id: "enemy-6",
+      name: "East Bridge Patrol",
+      route: [
+        p(815, 545),
+        p(960, 615),
+        p(1210, 640),
+        p(1130, 520)
+      ]
+    },
+    {
+      id: "enemy-7",
+      name: "East Road Patrol",
+      route: [
+        p(1210, 720),
+        p(1180, 865),
+        p(1165, 1035),
+        p(1040, 1115)
+      ]
+    },
+    {
+      id: "enemy-8",
+      name: "South East Patrol",
+      route: [
+        p(1130, 980),
+        p(1165, 1140),
+        p(970, 1190),
+        p(845, 1085)
+      ]
+    }
+  ]
 };
